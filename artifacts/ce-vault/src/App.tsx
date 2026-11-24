@@ -74,6 +74,8 @@ interface BotInfo {
   firstName: string;
   username: string;
   canJoinGroups: boolean;
+  webhookUrl?: string;
+  pendingUpdates?: number;
 }
 
 interface DetectedChat {
@@ -2593,6 +2595,11 @@ export default function App() {
                       <div style={{ fontSize: '10px', color: 'var(--t2)', fontFamily: "'Space Mono', monospace" }}>
                         Bot ID: {botInfo.id} · Group Access: {botInfo.canJoinGroups ? 'Enabled' : 'Disabled'}
                       </div>
+                      {botInfo.webhookUrl && (
+                        <div style={{ fontSize: '10px', color: 'var(--c)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
+                          🔗 Active Webhook: {botInfo.webhookUrl} (Pending: {botInfo.pendingUpdates ?? 0})
+                        </div>
+                      )}
                     </div>
                     <CeIcon name="check" size={18} color="var(--s)" />
                   </div>

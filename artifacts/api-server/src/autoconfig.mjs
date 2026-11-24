@@ -191,17 +191,19 @@ export async function verifyTelegramBot(token) {
   }
   const t0 = Date.now();
   try {
-    const r = await fetch(`https://api.telegram.org/bot${clean}/getMe`, {
-      signal: AbortSignal.timeout(8000),
-    });
-    const j = await r.json();
+    const [meRes, whRes] = await Promise.all([
+      fetch(`https://api.telegram.org/bot${clean}/getMe`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`https://api.telegram.org/bot${clean}/getWebhookInfo`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
+    ]);
+    const j = await meRes.json();
+    const whJson = whRes ? await whRes.json().catch(() => null) : null;
     const latencyMs = Date.now() - t0;
-    if (!r.ok || !j.ok) {
+    if (!meRes.ok || !j.ok) {
       return {
         ok: false,
-        status: r.status,
+        status: meRes.status,
         latencyMs,
-        description: j.description || `Telegram HTTP ${r.status}`,
+        description: j.description || `Telegram HTTP ${meRes.status}`,
       };
     }
     return {
@@ -212,6 +214,8 @@ export async function verifyTelegramBot(token) {
         firstName: j.result.first_name,
         username: j.result.username,
         canJoinGroups: Boolean(j.result.can_join_groups),
+        webhookUrl: whJson?.ok ? whJson.result?.url || '' : '',
+        pendingUpdates: whJson?.ok ? Number(whJson.result?.pending_update_count || 0) : 0,
       },
     };
   } catch (err) {
@@ -230,6 +234,14 @@ export async function detectTelegramChats(token) {
     });
     const j = await r.json();
     if (!r.ok || !j.ok) {
+      if (r.status === 409) {
+        return {
+          ok: false,
+          webhookActive: true,
+          description:
+            'บอทนี้ผูก Webhook ใช้งานจริงอยู่ (Active Webhook Detected) — ระบบจะไม่ลบ Webhook เดิม กรุณากรอก Chat ID โดยตรงเพื่อส่งข้อความ (Enter Chat ID directly)',
+        };
+      }
       return { ok: false, description: j.description || `Telegram HTTP ${r.status}` };
     }
     const seen = new Map();

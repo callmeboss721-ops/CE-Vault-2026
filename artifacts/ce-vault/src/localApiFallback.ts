@@ -9,6 +9,8 @@ interface BotInfo {
   firstName: string;
   username: string;
   canJoinGroups: boolean;
+  webhookUrl?: string;
+  pendingUpdates?: number;
 }
 
 interface DeliveryEntry {
@@ -353,8 +355,12 @@ async function browserVerifyBot(token: string) {
   }
   const t0 = Date.now();
   try {
-    const r = await origFetch(`https://api.telegram.org/bot${clean}/getMe`);
+    const [r, whRes] = await Promise.all([
+      origFetch(`https://api.telegram.org/bot${clean}/getMe`),
+      origFetch(`https://api.telegram.org/bot${clean}/getWebhookInfo`).catch(() => null),
+    ]);
     const j = await r.json();
+    const whJson = whRes ? await whRes.json().catch(() => null) : null;
     const latencyMs = Date.now() - t0;
     if (!r.ok || !j.ok) {
       return { ok: false, status: r.status, latencyMs, description: j.description || `HTTP ${r.status}` };
@@ -367,6 +373,8 @@ async function browserVerifyBot(token: string) {
         firstName: j.result.first_name as string,
         username: j.result.username as string,
         canJoinGroups: Boolean(j.result.can_join_groups),
+        webhookUrl: whJson?.ok ? ((whJson.result?.url as string) || '') : '',
+        pendingUpdates: whJson?.ok ? Number(whJson.result?.pending_update_count || 0) : 0,
       },
     };
   } catch (err) {
@@ -383,6 +391,14 @@ async function browserDetectChats(token: string) {
     const r = await origFetch(`https://api.telegram.org/bot${clean}/getUpdates?limit=30`);
     const j = await r.json();
     if (!r.ok || !j.ok) {
+      if (r.status === 409) {
+        return {
+          ok: false,
+          webhookActive: true,
+          description:
+            'บอทนี้ผูก Webhook ใช้งานจริงอยู่ (Active Webhook Detected) — ระบบจะไม่ลบ Webhook เดิม กรุณากรอก Chat ID โดยตรงเพื่อส่งข้อความ (Enter Chat ID directly)',
+        };
+      }
       return { ok: false, description: j.description || `HTTP ${r.status}` };
     }
     const seen = new Map<string, { id: string; title: string; username: string | null; type: string }>();
