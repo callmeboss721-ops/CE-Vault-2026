@@ -4,9 +4,12 @@ import {
   IconName,
   StatusBadge,
   TxStatus,
-  KpiCard,
   CeButton,
   TxItem,
+  BankLogo,
+  resolveBankAsset,
+  POPULAR_BANK_CODES,
+  ALL_BANK_CODES,
 } from './components/ui';
 import { MSG } from './constants/messages';
 import { parseSmartPinText, formatThaiSlipDateTime } from './utils/smartPin';
@@ -108,13 +111,15 @@ interface NotifyEvents {
   onNewCycle: boolean;
 }
 
-type MainTab = 'desk' | 'bots' | 'scan' | 'messages' | 'settings' | 'design';
-type PanelMode = 'tx' | 'summary' | 'pin' | 'rate' | 'cycle';
+type MainTab = 'desk' | 'scan' | 'bots' | 'settings';
+type SettingsSubTab = 'api' | 'messages' | 'banks';
+type PanelMode = 'tx' | 'pin' | 'rate' | 'cycle';
+type SimpleQueueFilter = 'ALL' | 'ACTION' | 'PENDING' | 'SETTLED';
 
 const ALL_ICONS: IconName[] = [
   'receive', 'send', 'rate', 'limit', 'profit', 'cycle', 'bank', 'pin', 'scan', 'user', 'amount', 'usdt',
   'ready', 'pending', 'settled', 'short', 'mismatch', 'duplicate', 'review', 'rejected', 'reversed', 'ocr',
-  'check', 'edit', 'trash', 'recheck', 'override', 'alert', 'search', 'copy', 'close', 'back', 'arrow-up', 'arrow-down', 'refresh', 'gem',
+  'check', 'edit', 'trash', 'recheck', 'override', 'alert', 'search', 'copy', 'close', 'back', 'refresh', 'gem',
   'settings', 'bot', 'key', 'link',
 ];
 
@@ -136,6 +141,7 @@ function fmtUsdt(n: number): string {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('desk');
+  const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('api');
   const [summary, setSummary] = useState<VaultSummary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [banks, setBanks] = useState<BankOption[]>([]);
@@ -149,7 +155,8 @@ export default function App() {
   const [botHandleInput, setBotHandleInput] = useState<string>('');
   const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState<PanelMode>('tx');
-  const [statusFilter, setStatusFilter] = useState<TxStatus | 'ALL'>('ALL');
+  const [queueFilter, setQueueFilter] = useState<SimpleQueueFilter>('ALL');
+  const [showBotCardPreview, setShowBotCardPreview] = useState<boolean>(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
@@ -168,12 +175,10 @@ export default function App() {
   } | null>(null);
   const [autoCfg, setAutoCfg] = useState<{
     rateSpread?: number;
-    autoSecrets?: Record<string, string>;
     integrations?: {
       storage?: { enabled: boolean; mode: string };
       marketRate?: { enabled: boolean; source: string };
       telegram?: { enabled: boolean; hasToken?: boolean; maskedToken?: string; chatId?: string; botInfo?: BotInfo | null };
-      supabase?: { enabled: boolean };
     };
   } | null>(null);
 
@@ -200,21 +205,21 @@ export default function App() {
   // Action form states
   const [settleAmount, setSettleAmount] = useState<string>('');
   const [overrideReason, setOverrideReason] = useState<string>('ลูกค้าโอนเข้าบัญชีสำรอง ยืนยันสลิปถูกต้อง (Verified Backup Account)');
-  const [rateInput, setRateInput] = useState<string>('43.00');
-  const [pinCodeInput, setPinCodeInput] = useState<string>('BBL');
+  const [rateInput, setRateInput] = useState<string>('34.23');
+  const [pinCodeInput, setPinCodeInput] = useState<string>('KBANK');
   const [limitInput, setLimitInput] = useState<string>('500000');
   const [smartPinInput, setSmartPinInput] = useState<string>('ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000');
 
   // Scan form states
   const [scanThb, setScanThb] = useState<string>('10000');
-  const [scanBank, setScanBank] = useState<string>('BBL');
-  const [scanAccount, setScanAccount] = useState<string>('097-0-28xxx-x');
+  const [scanBank, setScanBank] = useState<string>('KBANK');
+  const [scanAccount, setScanAccount] = useState<string>('1230004444');
   const [scanSender, setScanSender] = useState<string>('นาย สมชาย ใจดี');
   const [scanConfidence, setScanConfidence] = useState<string>('98.7');
   const [scanSlipDate, setScanSlipDate] = useState<string>(() => formatThaiSlipDateTime());
   const [scanResultMsg, setScanResultMsg] = useState<string>('');
 
-  // Messages tab filter
+  // Messages filter
   const [msgGroup, setMsgGroup] = useState<string>('ALL');
 
   const showToast = useCallback((msg: string) => {
@@ -228,12 +233,8 @@ export default function App() {
       if (!res.ok) return;
       const data = await res.json();
       setEngineMode(data.engineMode || 'backend-api-server');
-      if (data.customApiBaseUrl !== undefined) {
-        setCustomApiUrlInput(data.customApiBaseUrl || '');
-      }
-      if (data.rateSpread !== undefined) {
-        setSpreadInput(Number(data.rateSpread).toFixed(2));
-      }
+      if (data.customApiBaseUrl !== undefined) setCustomApiUrlInput(data.customApiBaseUrl || '');
+      if (data.rateSpread !== undefined) setSpreadInput(Number(data.rateSpread).toFixed(2));
       if (data.telegram) {
         setHasSavedToken(Boolean(data.telegram.hasToken));
         setMaskedToken(data.telegram.maskedToken || '');
@@ -262,7 +263,7 @@ export default function App() {
         setTransactions(data.transactions || []);
         setBanks(data.banks || []);
         setCycleHistory(data.cycleHistory || []);
-        setRateInput(String(data.summary?.rate ?? 43.0));
+        setRateInput(String(data.summary?.rate ?? 34.23));
         setPinCodeInput(String(data.summary?.pinnedBank?.code ?? 'BBL'));
         setLimitInput(String(data.summary?.limitThb ?? 500000));
         if (!selectedTxId && data.transactions?.length > 0) {
@@ -280,7 +281,7 @@ export default function App() {
       if (mRes.ok) setMarket(await mRes.json());
       if (cRes.ok) setAutoCfg(await cRes.json());
     } catch {
-      /* offline: keep last known values */
+      /* offline */
     }
   }, []);
 
@@ -313,82 +314,6 @@ export default function App() {
     return () => clearInterval(id);
   }, [fetchMarket, fetchVault, fetchBots]);
 
-  async function handleBotAction(slug: string, action: 'start' | 'pause' | 'maintenance' | 'retry' | 'dispatch') {
-    setLoadingAction(`bot:${slug}:${action}`);
-    try {
-      const res = await fetch(`/api/bots/${encodeURIComponent(slug)}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        showToast(`❌ ${data.message || 'สั่งการบอทไม่สำเร็จ (Bot Action Failed)'}`);
-        return;
-      }
-      if (Array.isArray(data.bots)) setBots(data.bots);
-      if (data.summary) setFleetSummary(data.summary);
-      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
-      if (action === 'dispatch') {
-        if (data.telegram?.ok) {
-          showToast(`🚀 ${data.bot.name} ส่งรายงานเข้า Telegram สำเร็จ (msg #${data.telegram.messageId})`);
-        } else {
-          showToast(`⚠️ ส่งเข้า Telegram ไม่สำเร็จ: ${data.telegram?.description || 'กรุณาตั้งค่า Token & Chat ID ในแท็บ Settings'}`);
-        }
-      } else {
-        showToast(`🤖 อัปเดตบอท ${data.bot.name} → ${data.bot.status.toUpperCase()}`);
-      }
-    } finally {
-      setLoadingAction(null);
-    }
-  }
-
-  async function handleSaveBotConfig(slug: string, clearCustomToken = false) {
-    setLoadingAction(`bot-cfg:${slug}`);
-    try {
-      const res = await fetch(`/api/bots/${encodeURIComponent(slug)}/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customToken: clearCustomToken ? '' : botCustomToken || undefined,
-          clearCustomToken,
-          customChatId: botCustomChatId,
-          handle: botHandleInput || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        if (Array.isArray(data.bots)) setBots(data.bots);
-        if (data.summary) setFleetSummary(data.summary);
-        setEditingBotSlug(null);
-        setBotCustomToken('');
-        showToast(`💾 บันทึกการตั้งค่าบอท ${data.bot.name} เรียบร้อยแล้ว (Bot Config Saved)`);
-      }
-    } finally {
-      setLoadingAction(null);
-    }
-  }
-
-  async function handleBroadcastFleet() {
-    setLoadingAction('broadcast-fleet');
-    try {
-      const res = await fetch('/api/bots/broadcast-fleet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
-      if (res.ok && data.ok) {
-        showToast(`📡 ส่งสถานะบอททั้ง ${fleetSummary?.total || 14} ตัวเข้า Telegram สำเร็จ! (msg #${data.messageId})`);
-      } else {
-        showToast(`❌ ส่งสถานะไม่สำเร็จ: ${data.description || 'กรุณาตั้งค่า Telegram Bot'}`);
-      }
-    } finally {
-      setLoadingAction(null);
-    }
-  }
-
   const selectedTx = transactions.find((t) => t.id === selectedTxId) || transactions[0] || null;
 
   useEffect(() => {
@@ -408,16 +333,16 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        showToast(`❌ ${data.message || data.error || 'เกิดข้อผิดพลาด (Action Failed)'}`);
+        showToast(`❌ ${data.message || data.error || 'เกิดข้อผิดพลาด'}`);
         return;
       }
       setSummary(data.summary);
       setTransactions(data.transactions);
       setSelectedTxId(data.tx.id);
       fetchSettings();
-      showToast(`✅ อัปเดตสำเร็จ (Updated): ${data.tx.id} → ${data.tx.status}`);
+      showToast(`✅ อัปเดต ${data.tx.id} → ${data.tx.status}`);
     } catch (e) {
-      showToast(`❌ เชื่อมต่อ API ไม่สำเร็จ (API Error): ${String(e)}`);
+      showToast(`❌ เชื่อมต่อ API ไม่สำเร็จ: ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -442,7 +367,7 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) {
         setScanResultMsg(MSG.OCR_FAIL());
-        showToast(`❌ ${data.message || 'อ่านสลิปล้มเหลว (OCR Failed)'}`);
+        showToast(`❌ ${data.message || 'อ่านสลิปล้มเหลว'}`);
         return;
       }
       setSummary(data.summary);
@@ -450,15 +375,16 @@ export default function App() {
       fetchSettings();
 
       if (data.duplicate && data.originalTx) {
-        const dupMsg = MSG.DUPLICATE({
-          id: data.originalTx.id,
-          thb: fmtThb(data.originalTx.thb),
-          usdt: fmtUsdt(data.originalTx.usdtExpected),
-          rate: data.originalTx.rate?.toFixed?.(2) || '43.00',
-          slip_time: data.originalTx.slipDate || data.originalTx.time,
-        });
-        setScanResultMsg(dupMsg);
-        showToast(`⚠️ พบสลิปซ้ำในระบบ (Duplicate Slip: ${data.originalTx.id})`);
+        setScanResultMsg(
+          MSG.DUPLICATE({
+            id: data.originalTx.id,
+            thb: fmtThb(data.originalTx.thb),
+            usdt: fmtUsdt(data.originalTx.usdtExpected),
+            rate: data.originalTx.rate?.toFixed?.(2) || '34.23',
+            slip_time: data.originalTx.slipDate || data.originalTx.time,
+          })
+        );
+        showToast(`⚠️ พบสลิปซ้ำในระบบ (${data.originalTx.id})`);
         return;
       }
 
@@ -514,10 +440,9 @@ export default function App() {
           })
         );
       }
-
-      showToast(`✅ สร้างรายการสำเร็จ (Created ${tx.id} · ${tx.dateMismatch ? 'DATE MISMATCH' : tx.status})`);
+      showToast(`✅ รับสลิป ${tx.id} เรียบร้อย (${tx.dateMismatch ? 'วันที่ไม่ตรง' : tx.status})`);
     } catch (e) {
-      showToast(`❌ ประมวลผลสลิปล้มเหลว (Scan Failed): ${String(e)}`);
+      showToast(`❌ ประมวลผลสลิปล้มเหลว: ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -529,15 +454,11 @@ export default function App() {
       const res = await fetch('/api/dashboard/smart-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rawText: smartPinInput,
-          sendToTelegram,
-          pinInTelegram,
-        }),
+        body: JSON.stringify({ rawText: smartPinInput, sendToTelegram, pinInTelegram }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        showToast(`❌ ${data.message || 'แปลงข้อมูลบัญชีไม่สำเร็จ (Smart PIN Parse Failed)'}`);
+        showToast(`❌ ${data.message || 'แปลงข้อมูลบัญชีไม่สำเร็จ'}`);
         return;
       }
       setSummary(data.summary);
@@ -549,14 +470,13 @@ export default function App() {
       if (sendToTelegram && data.telegram?.ok) {
         showToast(
           data.pinned
-            ? `📌 จัดรูปแบบ + ส่งและปักหมุดเข้า Telegram สำเร็จ! (Message #${data.telegram.messageId} Pinned)`
-            : `📨 จัดรูปแบบ & ส่งเข้า Telegram สำเร็จ (Message #${data.telegram.messageId} · ยังไม่ได้ปักหมุดอัตโนมัติ: ${data.pinDetail?.description || 'ต้องให้บอทเป็นแอดมินกลุ่ม'})`
+            ? `📌 ปักหมุดบัญชีเข้า Telegram สำเร็จ! (Message #${data.telegram.messageId})`
+            : `📨 ส่งการ์ดบัญชีเข้า Telegram แล้ว (Message #${data.telegram.messageId})`
         );
-      } else if (sendToTelegram && !tgConnected) {
-        showToast('📌 บันทึก PIN ในระบบแล้ว (ตั้งค่า Telegram Bot ในแท็บ Settings เพื่อส่งปักหมุดเข้ากลุ่มอัตโนมัติ)');
       } else {
-        showToast(`📌 บันทึก Smart PIN สำเร็จ (${data.pinnedBank.code} · ${data.pinnedBank.account})`);
+        showToast(`📌 เปลี่ยนบัญชีหลักเป็น ${data.pinnedBank.code} · ${data.pinnedBank.account} แล้ว`);
       }
+      setPanelMode('tx');
     } catch (e) {
       showToast(`❌ Smart PIN ล้มเหลว: ${String(e)}`);
     } finally {
@@ -583,9 +503,10 @@ export default function App() {
         fetchSettings();
         showToast(
           sendToTelegram && data.telegram?.ok
-            ? `📌 ปักหมุดบัญชีและส่งเข้า Telegram สำเร็จ (${data.pinned ? 'Pinned ✓' : 'Sent ✓'})`
-            : `📌 ปักหมุดบัญชีสำเร็จ (Pinned: ${data.pinnedBank.code} · ${data.pinnedBank.account})`
+            ? `📌 ปักหมุดบัญชีเข้า Telegram สำเร็จ (${data.pinned ? 'Pinned ✓' : 'Sent ✓'})`
+            : `📌 เปลี่ยนบัญชีหลักเป็น ${data.pinnedBank.code} แล้ว`
         );
+        setPanelMode('tx');
       }
     } finally {
       setLoadingAction(null);
@@ -604,7 +525,8 @@ export default function App() {
       if (res.ok && data.ok) {
         setSummary(data.summary);
         fetchMarket();
-        showToast(`💱 อัปเดตเรทโต๊ะสำเร็จ (Desk Rate: ${data.rate.toFixed(2)} THB/USDT)`);
+        showToast(`💱 ตั้งเรทโต๊ะเป็น ${data.rate.toFixed(2)} THB แล้ว`);
+        setPanelMode('tx');
       }
     } finally {
       setLoadingAction(null);
@@ -624,7 +546,8 @@ export default function App() {
         setSummary(data.summary);
         setRateInput(String(data.rate));
         fetchMarket();
-        showToast(`🤖 เปิดโหมดเรทอัตโนมัติ (Auto Market Rate: ${data.rate.toFixed(2)} THB/USDT)`);
+        showToast(`🤖 ตั้งเรทอัตโนมัติตาม Binance TH: ${data.rate.toFixed(2)} THB`);
+        setPanelMode('tx');
       }
     } finally {
       setLoadingAction(null);
@@ -645,7 +568,8 @@ export default function App() {
         setTransactions(data.transactions);
         setCycleHistory(data.cycleHistory || []);
         fetchSettings();
-        showToast(`🔄 เปลี่ยนรอบงานสำเร็จ (Cycle Rollover: ${data.oldCycle} → ${data.newCycle})`);
+        showToast(`🔄 ปิดรอบ ${data.oldCycle} → เปิดรอบ ${data.newCycle} สำเร็จ`);
+        setPanelMode('tx');
       }
     } finally {
       setLoadingAction(null);
@@ -661,14 +585,83 @@ export default function App() {
         setSummary(data.summary);
         setTransactions(data.transactions);
         if (data.transactions?.[0]) setSelectedTxId(data.transactions[0].id);
-        showToast('🔄 รีเซ็ตข้อมูลตัวอย่างแล้ว (Demo Data Reset)');
+        showToast('🔄 รีเซ็ตข้อมูลตัวอย่างแล้ว');
       }
     } finally {
       setLoadingAction(null);
     }
   }
 
-  // ── SETTINGS & LIVE TELEGRAM HANDLERS ──
+  async function handleBotAction(slug: string, action: 'start' | 'pause' | 'maintenance' | 'retry' | 'dispatch') {
+    setLoadingAction(`bot:${slug}:${action}`);
+    try {
+      const res = await fetch(`/api/bots/${encodeURIComponent(slug)}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(`❌ ${data.message || 'สั่งการบอทไม่สำเร็จ'}`);
+        return;
+      }
+      if (Array.isArray(data.bots)) setBots(data.bots);
+      if (data.summary) setFleetSummary(data.summary);
+      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
+      if (action === 'dispatch') {
+        if (data.telegram?.ok) showToast(`🚀 ${data.bot.name} ส่งเข้า Telegram สำเร็จ (#${data.telegram.messageId})`);
+        else showToast(`⚠️ ส่งเข้า Telegram ไม่สำเร็จ: ${data.telegram?.description || 'กรุณาตั้งค่า Token & Chat ID'}`);
+      } else {
+        showToast(`🤖 ${data.bot.name} → ${data.bot.status.toUpperCase()}`);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function handleSaveBotConfig(slug: string, clearCustomToken = false) {
+    setLoadingAction(`bot-cfg:${slug}`);
+    try {
+      const res = await fetch(`/api/bots/${encodeURIComponent(slug)}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customToken: clearCustomToken ? '' : botCustomToken || undefined,
+          clearCustomToken,
+          customChatId: botCustomChatId,
+          handle: botHandleInput || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        if (Array.isArray(data.bots)) setBots(data.bots);
+        if (data.summary) setFleetSummary(data.summary);
+        setEditingBotSlug(null);
+        setBotCustomToken('');
+        showToast(`💾 บันทึกการตั้งค่า ${data.bot.name} แล้ว`);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function handleBroadcastFleet() {
+    setLoadingAction('broadcast-fleet');
+    try {
+      const res = await fetch('/api/bots/broadcast-fleet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
+      if (res.ok && data.ok) showToast(`📡 ส่งสถานะบอททั้ง ${fleetSummary?.total || 14} ตัวเข้า Telegram สำเร็จ (#${data.messageId})`);
+      else showToast(`❌ ส่งไม่สำเร็จ: ${data.description || 'กรุณาตั้งค่า Telegram Bot'}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
   async function handleVerifyBot() {
     setLoadingAction('tg-verify');
     setTgStatusBanner(null);
@@ -680,17 +673,15 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        const msg = `ตรวจสอบบอทไม่สำเร็จ (Verify Failed): ${data.description || 'Invalid Token'}`;
+        const msg = `ตรวจสอบบอทไม่สำเร็จ: ${data.description || 'Invalid Token'}`;
         setTgStatusBanner({ ok: false, text: msg });
         showToast(`❌ ${msg}`);
         return;
       }
       setBotInfo(data.bot);
-      const okMsg = `เชื่อมต่อบอทสำเร็จ (Verified): @${data.bot.username} (${data.bot.firstName}) · ${data.latencyMs}ms`;
+      const okMsg = `เชื่อมต่อบอทสำเร็จ: @${data.bot.username} (${data.bot.firstName}) · ${data.latencyMs}ms`;
       setTgStatusBanner({ ok: true, text: okMsg });
       showToast(`✅ ${okMsg}`);
-    } catch (e) {
-      setTgStatusBanner({ ok: false, text: String(e) });
     } finally {
       setLoadingAction(null);
     }
@@ -706,24 +697,15 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        const msg = data.description || 'ดึงรายการแชทไม่สำเร็จ (Failed to fetch updates)';
-        setTgStatusBanner({ ok: false, text: msg });
-        showToast(`❌ ${msg}`);
+        setTgStatusBanner({ ok: false, text: data.description || 'ดึงแชทไม่สำเร็จ' });
         return;
       }
       setDetectedChats(data.chats || []);
       if (data.chats?.length > 0) {
         if (!chatIdInput) setChatIdInput(data.chats[0].id);
-        setTgStatusBanner({
-          ok: true,
-          text: `พบห้องแชทล่าสุด ${data.chats.length} รายการ (Detected ${data.chats.length} active chats) — คลิกเลือกด้านล่างได้เลย`,
-        });
-        showToast(`📡 พบห้องแชท ${data.chats.length} รายการ (Chats Detected)`);
+        setTgStatusBanner({ ok: true, text: `พบห้องแชท ${data.chats.length} รายการ — คลิกเลือกได้เลย` });
       } else {
-        setTgStatusBanner({
-          ok: false,
-          text: 'ยังไม่พบข้อความล่าสุด — กรุณาทักแชทหาบอท หรือพิมพ์ข้อความในกลุ่มที่มีบอทอยู่ 1 ครั้ง แล้วกดดึงใหม่ (Send a message to the bot/group first, then retry)',
-        });
+        setTgStatusBanner({ ok: false, text: 'ยังไม่พบแชทล่าสุด กรุณาทักบอท 1 ครั้งแล้วลองใหม่' });
       }
     } finally {
       setLoadingAction(null);
@@ -747,26 +729,18 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        if (clearToken) {
-          setBotTokenInput('');
-          setBotInfo(null);
-        } else if (botTokenInput) {
-          setBotTokenInput('');
-        }
+        setBotTokenInput('');
+        if (clearToken) setBotInfo(null);
         setHasSavedToken(Boolean(data.telegram?.hasToken));
         setMaskedToken(data.telegram?.maskedToken || '');
         if (data.telegram?.botInfo !== undefined) setBotInfo(data.telegram.botInfo);
-        await Promise.all([fetchMarket(), fetchVault(), fetchSettings()]);
+        await Promise.all([fetchMarket(), fetchVault(), fetchSettings(), fetchBots()]);
         setTgStatusBanner({
           ok: true,
-          text: clearToken
-            ? 'ล้างค่า Token บอทเรียบร้อยแล้ว (Bot Token Cleared)'
-            : 'บันทึกการตั้งค่า API & Telegram Bot เรียบร้อยแล้ว (Settings Saved)',
+          text: clearToken ? 'ล้าง Token บอทแล้ว' : 'บันทึกการตั้งค่าเรียบร้อยแล้ว (Settings Saved)',
         });
-        showToast('✅ บันทึกการตั้งค่าสำเร็จ (Settings Saved)');
+        showToast('✅ บันทึกการตั้งค่าสำเร็จ');
       }
-    } catch (e) {
-      showToast(`❌ บันทึกไม่สำเร็จ (Save Error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -788,19 +762,12 @@ export default function App() {
       const data = await res.json();
       if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
       if (!res.ok || !data.ok) {
-        const errText = `ส่งเข้า Telegram ไม่สำเร็จ (Send Failed): ${data.description || 'Unknown error'}`;
-        setTgStatusBanner({ ok: false, text: errText });
-        showToast(`❌ ${errText}`);
-        if (!hasSavedToken && !botTokenInput) {
-          setActiveTab('settings');
-        }
+        setTgStatusBanner({ ok: false, text: data.description || 'ส่งไม่สำเร็จ' });
+        showToast(`❌ ส่งไม่สำเร็จ: ${data.description || 'Error'}`);
         return;
       }
-      const okText = `ส่งเข้า Telegram สำเร็จจริง! (Delivered to ${data.chatTitle} · msg #${data.messageId} · ${data.latencyMs}ms)`;
-      setTgStatusBanner({ ok: true, text: okText });
-      showToast(`🚀 ${okText}`);
-    } catch (e) {
-      showToast(`❌ ส่งข้อความล้มเหลว (Telegram Error): ${String(e)}`);
+      setTgStatusBanner({ ok: true, text: `ส่งเข้า ${data.chatTitle} สำเร็จ! (msg #${data.messageId} · ${data.latencyMs}ms)` });
+      showToast(`🚀 ส่งเข้า Telegram สำเร็จ (#${data.messageId})`);
     } finally {
       setLoadingAction(null);
     }
@@ -814,7 +781,7 @@ export default function App() {
         const m = await res.json();
         setMarket(m);
         await fetchVault();
-        showToast(`📈 อัปเดตเรทตลาดสดแล้ว (Live Market: ${m.rate?.toFixed(2) || '—'} THB · ${m.source || 'Auto'})`);
+        showToast(`📈 อัปเดต Binance TH: ${m.rate?.toFixed(2) || '—'} THB`);
       }
     } finally {
       setLoadingAction(null);
@@ -829,21 +796,16 @@ export default function App() {
       const ms = Math.round(performance.now() - t0);
       setApiLatencyMs(ms);
       setApiHealthy(res.ok);
-      if (res.ok) {
-        const j = await res.json();
-        showToast(`🩺 API ปกติ (Healthy 200 OK · ${j.service} · ${ms}ms)`);
-      } else {
-        showToast(`❌ API ตอบกลับผิดปกติ (HTTP ${res.status})`);
-      }
+      showToast(res.ok ? `🩺 API ปกติ (200 OK · ${ms}ms)` : `❌ API ผิดปกติ (${res.status})`);
     } catch {
       setApiHealthy(false);
-      showToast('❌ ไม่สามารถเชื่อมต่อ API ได้ (API Unreachable)');
+      showToast('❌ เชื่อมต่อ API ไม่ได้');
     } finally {
       setLoadingAction(null);
     }
   }
 
-  function copyText(txt: string, label = 'คัดลอกข้อความแล้ว (Copied to Clipboard)') {
+  function copyText(txt: string, label = 'คัดลอกข้อความแล้ว') {
     navigator.clipboard?.writeText(txt);
     showToast(`📋 ${label}`);
   }
@@ -901,7 +863,6 @@ export default function App() {
       });
     }
     if (tx.status === 'SHORT') {
-      const shortAmt = Math.max(0, tx.usdtExpected - tx.usdtSent);
       return MSG.TX_SHORT({
         id: tx.id,
         thb: fmtThb(tx.thb),
@@ -910,7 +871,7 @@ export default function App() {
         account: tx.account,
         usdt_expected: fmtUsdt(tx.usdtExpected),
         usdt_sent: fmtUsdt(tx.usdtSent),
-        usdt_short: fmtUsdt(shortAmt),
+        usdt_short: fmtUsdt(Math.max(0, tx.usdtExpected - tx.usdtSent)),
         slip_time: slipStamp,
       });
     }
@@ -937,135 +898,85 @@ export default function App() {
       });
     }
     if (tx.status === 'REJECTED') {
-      return MSG.TX_REJECTED({
-        id: tx.id,
-        thb: fmtThb(tx.thb),
-        reason: tx.notes || 'ปฏิเสธรายการโดยเจ้าหน้าที่ (Rejected by Operator)',
-      });
+      return MSG.TX_REJECTED({ id: tx.id, thb: fmtThb(tx.thb), reason: tx.notes || 'ปฏิเสธรายการ' });
     }
     if (tx.status === 'REVERSED') {
-      return MSG.TX_REVERSED({
-        id: tx.id,
-        thb: fmtThb(tx.thb),
-        usdt: fmtUsdt(tx.usdtSent),
-        operator: 'ADMIN',
-        reason: tx.notes || 'ยกเลิกรายการ (Reversed)',
-      });
+      return MSG.TX_REVERSED({ id: tx.id, thb: fmtThb(tx.thb), usdt: fmtUsdt(tx.usdtSent), operator: 'ADMIN', reason: tx.notes || 'ยกเลิก' });
     }
     return MSG.OCR_LOADING();
   }
 
   const smartPinPreview = parseSmartPinText(smartPinInput, Number(limitInput) || summary?.limitThb || 500000);
-
-  const filteredTransactions = transactions.filter((t) =>
-    statusFilter === 'ALL' ? true : t.status === statusFilter
-  );
-
   const tgConnected = Boolean((hasSavedToken || botTokenInput.trim()) && chatIdInput.trim());
+
+  const actionNeededCount = transactions.filter((t) =>
+    ['READY', 'SHORT', 'MISMATCH', 'REVIEW', 'OCR'].includes(t.status)
+  ).length;
+
+  const filteredTransactions = transactions.filter((t) => {
+    if (queueFilter === 'ALL') return true;
+    if (queueFilter === 'ACTION') return ['READY', 'SHORT', 'MISMATCH', 'REVIEW', 'OCR'].includes(t.status);
+    if (queueFilter === 'PENDING') return t.status === 'PENDING';
+    if (queueFilter === 'SETTLED') return t.status === 'SETTLED';
+    return true;
+  });
+
+  const currentScanCard =
+    scanResultMsg ||
+    MSG.OCR_READY({
+      thb: fmtThb(Number(scanThb || 10000)),
+      usdt: fmtUsdt(Number(scanThb || 10000) / (summary?.rate || 34.23)),
+      bank: scanBank,
+      account: scanAccount,
+      name: scanSender,
+      rate: (summary?.rate || 34.23).toFixed(2),
+      confidence: Number(scanConfidence || 98.7),
+      slip_time: scanSlipDate,
+    });
 
   const messageTemplatesList = [
     {
       key: 'PIN-01',
-      group: 'Verify · Checks',
-      title: 'ระบบ PIN อัจฉริยะ (Smart PIN Auto-Format Card)',
+      group: 'PIN & Verify',
+      title: 'ปักหมุดบัญชีรับเงิน (Smart PIN Card)',
       text: MSG.SMART_PIN_CARD({ bank: 'KBANK', account: '1230004444', name: 'ธิติ ทองมี', limit: '50,000' }),
     },
     {
-      key: 'MSG-00',
-      group: 'Verify · Checks',
-      title: 'วันที่สลิปไม่ตรงกับปัจจุบัน (Slip Date Mismatch)',
+      key: 'SLIP-01',
+      group: 'PIN & Verify',
+      title: 'วันที่สลิปไม่ตรงกับปัจจุบัน (Date Mismatch)',
       text: MSG.SLIP_DATE_MISMATCH({ thb: '5,000.00', rate: '44.00', bank: 'KTB', account: '••••1670', slip_time: '13/12/2569 19:39' }),
     },
-    { key: 'MSG-01', group: 'Intake · OCR', title: 'กำลังอ่านสลิป (Scanning Slip)', text: MSG.OCR_LOADING() },
     {
-      key: 'MSG-02',
-      group: 'Intake · OCR',
-      title: 'อ่านสลิปสำเร็จ — พร้อมยืนยัน (OCR Ready)',
-      text: MSG.OCR_READY({ thb: '10,000.00', usdt: '232.56', bank: 'BBL', account: '097-0-28123-4', name: 'นาย สมชาย ใจดี', rate: '43.00', confidence: 98.7 }),
-    },
-    { key: 'MSG-03', group: 'Intake · OCR', title: 'อ่านสลิปล้มเหลว (OCR Failed)', text: MSG.OCR_FAIL() },
-    {
-      key: 'MSG-04',
-      group: 'Intake · OCR',
-      title: 'ความแม่นยำต่ำ — รอตรวจสอบ (Low Confidence Review)',
-      text: MSG.OCR_LOW_CONFIDENCE({ thb: '10,000.00', bank: 'BBL', account: '097-0-28123-4', name: 'นาย สม...ย ใจดี', rate: '43.00', confidence: 72 }),
+      key: 'SLIP-02',
+      group: 'PIN & Verify',
+      title: 'สลิปปกติพร้อมโอน (OCR Ready)',
+      text: MSG.OCR_READY({ thb: '10,000.00', usdt: '292.14', bank: 'KBANK', account: '1230004444', name: 'นาย สมชาย ใจดี', rate: '34.23', confidence: 98.7 }),
     },
     {
-      key: 'MSG-05',
-      group: 'Verify · Checks',
-      title: 'บัญชีไม่ตรงกับ PIN (Bank Account Mismatch)',
-      text: MSG.BANK_MISMATCH({ thb: '15,000.00', rate: '43.00', bank: 'KTB', account: 'xxx-x-x7413-x' }).replace('[PIN_BANK]', summary?.pinnedBank.code || 'BBL').replace('[PIN_ACCOUNT]', summary?.pinnedBank.account || '097-0-28xxx-x'),
+      key: 'SLIP-03',
+      group: 'PIN & Verify',
+      title: 'บัญชีในสลิปไม่ตรง PIN (Bank Mismatch)',
+      text: MSG.BANK_MISMATCH({ thb: '15,000.00', rate: '34.23', bank: 'KTB', account: '••••7413' })
+        .replace('[PIN_BANK]', summary?.pinnedBank.code || 'KBANK')
+        .replace('[PIN_ACCOUNT]', summary?.pinnedBank.account || '1230004444'),
     },
     {
-      key: 'MSG-06',
-      group: 'Verify · Checks',
-      title: 'ตรวจพบสลิปซ้ำ (Duplicate Slip)',
-      text: MSG.DUPLICATE({ id: '#CE-2026-A041', thb: '10,000.00', usdt: '232.56', time: '14:35 น.' }),
+      key: 'TX-01',
+      group: 'Settlement',
+      title: 'โอนเหรียญครบสมบูรณ์ (Settled)',
+      text: MSG.TX_SETTLED({ id: '#CE-2026-A041', thb: '10,000.00', usdt: '292.14', bank: 'KBANK', account: '1230004444', rate: '34.23' }),
     },
     {
-      key: 'MSG-07',
-      group: 'Verify · Checks',
-      title: 'ยอดเกินวงเงินรอบงาน (Cycle Limit Exceeded)',
-      text: MSG.LIMIT_EXCEEDED({ thb: '10,000', used: '495,000', limit: '500,000', remaining: '5,000' }),
+      key: 'TX-02',
+      group: 'Settlement',
+      title: 'ยอดโอนเหรียญขาด (Short)',
+      text: MSG.TX_SHORT({ id: '#CE-2026-A043', thb: '10,000.00', rate: '34.23', bank: 'KBANK', account: '1230004444', usdt_expected: '292.14', usdt_sent: '289.58', usdt_short: '2.56' }),
     },
     {
-      key: 'MSG-08',
-      group: 'Verify · Checks',
-      title: 'เรทเปลี่ยนระหว่างสแกน (Rate Changed During OCR)',
-      text: MSG.RATE_CHANGED({ rate: '43.25', thb: '10,000.00', usdt: '231.21' }),
-    },
-    {
-      key: 'MSG-09',
-      group: 'Transaction',
-      title: 'เข้าคิวรอโอนเหรียญ (Queued · PENDING)',
-      text: MSG.TX_QUEUED({ id: '#CE-2026-A044', thb: '10,000.00', usdt: '232.56', rate: '43.00' }),
-    },
-    {
-      key: 'MSG-10',
-      group: 'Transaction',
-      title: 'โอนเหรียญสำเร็จครบจำนวน (Settlement Completed)',
-      text: MSG.TX_SETTLED({ id: '#CE-2026-A041', thb: '10,000.00', usdt: '232.56', rate: '43.00', time: '14:35 น.' }),
-    },
-    {
-      key: 'MSG-11',
-      group: 'Transaction',
-      title: 'ยอดโอนเหรียญขาด (Short Settlement)',
-      text: MSG.TX_SHORT({ id: '#CE-2026-A043', usdt_expected: '232.56', usdt_sent: '230.00', usdt_short: '2.56' }),
-    },
-    {
-      key: 'MSG-12',
-      group: 'Transaction',
-      title: 'โอนชดเชยครบแล้ว (Short Resolved → Settled)',
-      text: MSG.TX_SHORT_RESOLVED({ id: '#CE-2026-A043', usdt_expected: '232.56', usdt_sent: '232.56' }),
-    },
-    {
-      key: 'MSG-13',
-      group: 'Transaction',
-      title: 'ยอดส่งเกินกำหนด (Settlement Overrun Blocked)',
-      text: MSG.TX_OVERRUN({ id: '#CE-2026-A044', usdt_expected: '232.56', usdt_sent: '240.00' }),
-    },
-    {
-      key: 'MSG-14',
-      group: 'Transaction',
-      title: 'ปฏิเสธรายการ (Transaction Rejected)',
-      text: MSG.TX_REJECTED({ id: '#CE-2026-A042', thb: '15,000.00', reason: 'บัญชีไม่ตรงและไม่มีการแจ้งล่วงหน้า (Unverified Mismatch)' }),
-    },
-    {
-      key: 'MSG-15',
-      group: 'Transaction',
-      title: 'ยกเลิกย้อนกลับรายการ (Transaction Reversed)',
-      text: MSG.TX_REVERSED({ id: '#CE-2026-A041', thb: '10,000.00', usdt: '232.56', operator: 'ADMIN', reason: 'ลูกค้าขอยกเลิกรายการ (Client Cancellation)' }),
-    },
-    {
-      key: 'MSG-16',
-      group: 'Mismatch',
-      title: 'อนุมัติ Override บัญชีไม่ตรง (Mismatch Override)',
-      text: MSG.MISMATCH_OVERRIDDEN({ id: '#CE-2026-A042', operator: 'OP-01', reason: 'ลูกค้าโอนเข้าบัญชี KTB สำรอง ยืนยันแล้ว (Verified Backup Account)' }),
-    },
-    {
-      key: 'MSG-17',
-      group: 'Cycle',
-      title: 'สรุปภาพรวมรอบปัจจุบัน (Current Cycle Summary)',
+      key: 'CYC-01',
+      group: 'Cycle & Alerts',
+      title: 'สรุปรอบงานปัจจุบัน (Cycle Summary)',
       text: MSG.CYCLE_SUMMARY({
         cycle_current: summary?.cycle || 'CE44',
         limit: fmtInt(summary?.limitThb || 500000),
@@ -1076,1157 +987,753 @@ export default function App() {
         usdt_expected: fmtUsdt(summary?.pendingUsdt || 184.32),
         usdt_short: fmtUsdt(summary?.shortUsdt || 2.56),
         profit: fmtThb(summary?.profitThb || 8742.5),
-        rate: String(summary?.rate || 43.0),
+        rate: String(summary?.rate || 34.23),
       }),
     },
     {
-      key: 'MSG-18',
-      group: 'Cycle',
-      title: 'เปลี่ยนรอบงานใหม่ (New Cycle Rollover)',
-      text: MSG.CYCLE_NEW_DONE({
-        cycle_current: 'CE44',
-        cycle_new: 'CE45',
-        thb: '327,450',
-        usdt: '7,614.32',
-        count_pending: 1,
-      }),
-    },
-    {
-      key: 'MSG-19',
-      group: 'Alerts',
-      title: 'แจ้งเตือนวงเงินแตะ 80% (80% Limit Alert)',
-      text: MSG.ALERT_LIMIT_80({
-        cycle_current: summary?.cycle || 'CE44',
-        used: '405,000',
-        limit: '500,000',
-        remaining: '95,000',
-        percent: 81,
-      }),
-    },
-    {
-      key: 'MSG-20',
-      group: 'Alerts',
-      title: 'แจ้งเตือนรายการรอโอนค้างนาน (Stale Pending Alert)',
-      text: MSG.ALERT_PENDING_STALE({
-        id: '#CE-2026-A044',
-        thb: '10,000.00',
-        usdt: '118.56',
-        minutes: 15,
-      }),
+      key: 'ALT-01',
+      group: 'Cycle & Alerts',
+      title: 'แจ้งเตือนวงเงินแตะ 80% (Limit Alert)',
+      text: MSG.ALERT_LIMIT_80({ cycle_current: summary?.cycle || 'CE44', used: '405,000', limit: '500,000', remaining: '95,000', percent: 81 }),
     },
   ];
 
-  const currentScanCard =
-    scanResultMsg ||
-    MSG.OCR_READY({
-      thb: fmtThb(Number(scanThb || 10000)),
-      usdt: fmtUsdt(Number(scanThb || 10000) / (summary?.rate || 43)),
-      bank: scanBank,
-      account: scanAccount,
-      name: scanSender,
-      rate: (summary?.rate || 43).toFixed(2),
-      confidence: Number(scanConfidence || 98.7),
-    });
+  const pinnedAsset = resolveBankAsset(summary?.pinnedBank.code);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--b0)', color: 'var(--t1)', display: 'flex', flexDirection: 'column' }}>
-      {/* ── TOP HEADER ── */}
+      {/* ── CLEAN TOP NAVIGATION BAR (ONLY 4 CLEAR TABS) ── */}
       <header
         style={{
-          background: 'rgba(6, 16, 32, 0.92)',
-          backdropFilter: 'blur(12px)',
+          background: 'rgba(6, 16, 32, 0.94)',
+          backdropFilter: 'blur(14px)',
           borderBottom: '1px solid var(--br)',
-          padding: '12px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '16px',
           position: 'sticky',
           top: 0,
           zIndex: 50,
-          flexWrap: 'wrap',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              background: 'var(--ca)',
-              border: '1px solid var(--cb)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 18px rgba(63, 224, 255, 0.18)',
-            }}
-          >
-            <CeIcon name="gem" size={20} color="var(--c)" />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 800, letterSpacing: '2px', color: 'var(--c)' }}>
-                CE VAULT
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '9999px',
-                  background: 'var(--ga)',
-                  border: '1px solid var(--gb)',
-                  color: 'var(--g)',
-                  fontFamily: "'Space Mono', monospace",
-                }}
-              >
-                {summary?.cycle || 'CE44'}
-              </span>
-            </div>
-            <div style={{ fontSize: '10px', color: 'var(--t3)', letterSpacing: '0.6px' }}>
-              ระบบศูนย์บัญชาการโต๊ะแลกเปลี่ยน (Operator Command Desk)
-            </div>
-          </div>
-        </div>
-
-        {/* Center Live Status Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <div
-            onClick={() => {
-              setActiveTab('desk');
-              setPanelMode('pin');
-            }}
-            style={{
-              cursor: 'pointer',
-              padding: '6px 11px',
-              borderRadius: '8px',
-              background: 'var(--b2)',
-              border: '1px solid var(--br)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '7px',
-              fontSize: '11px',
-            }}
-            title="บัญชีรับโอนหลักวันนี้ (Today's Pinned Bank)"
-          >
-            <CeIcon name="pin" size={14} color="var(--s)" />
-            <span style={{ color: 'var(--t3)' }}>บัญชีหลัก (PIN):</span>
-            <strong style={{ color: 'var(--s)', fontFamily: "'Space Mono', monospace" }}>
-              {summary?.pinnedBank.code || 'BBL'} · {summary?.pinnedBank.account || '097-0-28xxx-x'}
-            </strong>
-          </div>
-
-          <div
-            onClick={() => {
-              setActiveTab('desk');
-              setPanelMode('rate');
-            }}
-            style={{
-              cursor: 'pointer',
-              padding: '6px 11px',
-              borderRadius: '8px',
-              background: 'var(--b2)',
-              border: '1px solid var(--br)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '7px',
-              fontSize: '11px',
-            }}
-            title="เรทขายโต๊ะปัจจุบัน (Current Desk Rate)"
-          >
-            <CeIcon name="rate" size={14} color="var(--g)" />
-            <span style={{ color: 'var(--t3)' }}>เรทโต๊ะ (Desk):</span>
-            <strong style={{ color: 'var(--g)', fontFamily: "'Space Mono', monospace" }}>
-              {summary ? summary.rate.toFixed(2) : '43.00'} THB
-            </strong>
-          </div>
-
-          <div
-            onClick={handleRefreshMarketNow}
-            style={{
-              cursor: 'pointer',
-              padding: '6px 11px',
-              borderRadius: '8px',
-              background: 'var(--b2)',
-              border: '1px solid var(--br)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '7px',
-              fontSize: '11px',
-            }}
-            title={
-              market?.bid && market?.ask
-                ? `${market.source || 'Binance TH'} · Bid ${market.bid.toFixed(2)} / Ask ${market.ask.toFixed(2)} · 24h ${market.low24h?.toFixed(2)}–${market.high24h?.toFixed(2)} (คลิกเพื่อรีเฟรช)`
-                : 'คลิกเพื่อดึงเรทตลาด Binance TH ล่าสุด'
-            }
-          >
-            <CeIcon name="usdt" size={14} color="var(--c)" />
-            <span style={{ color: 'var(--t3)' }}>{market?.source || 'Binance TH'}:</span>
-            <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
-              {market?.rate ? market.rate.toFixed(2) : '—'}
-            </strong>
-            <span style={{ color: 'var(--t3)', fontSize: '9px' }}>{market?.rateMode === 'auto' ? 'AUTO' : 'MANUAL'}</span>
-          </div>
-
-          <div
-            onClick={() => setActiveTab('bots')}
-            style={{
-              cursor: 'pointer',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              background: tgConnected ? 'var(--sa)' : 'var(--wa)',
-              border: `1px solid ${tgConnected ? 'var(--sb)' : 'var(--wb)'}`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '10px',
-              fontWeight: 700,
-              color: tgConnected ? 'var(--s)' : 'var(--w)',
-            }}
-            title="ศูนย์ควบคุมบอททั้งหมด (Open CE Empire Bot Fleet)"
-          >
-            <CeIcon name="bot" size={13} color={tgConnected ? 'var(--s)' : 'var(--w)'} />
-            {fleetSummary
-              ? `BOTS ${fleetSummary.active}/${fleetSummary.total} ONLINE`
-              : tgConnected
-              ? `TG ${botInfo?.username ? `@${botInfo.username}` : 'Ready'}`
-              : 'ตั้งค่าบอท (Setup Bot)'}
-          </div>
-
-          <div
-            onClick={() => setActiveTab('settings')}
-            style={{
-              cursor: 'pointer',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              background: apiHealthy ? 'var(--sa)' : 'var(--da)',
-              border: `1px solid ${apiHealthy ? 'var(--sb)' : 'var(--db)'}`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '10px',
-              fontWeight: 700,
-              color: apiHealthy ? 'var(--s)' : 'var(--d)',
-              fontFamily: "'Space Mono', monospace",
-            }}
-          >
-            <span
+        <div
+          style={{
+            maxWidth: '1280px',
+            margin: '0 auto',
+            padding: '12px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '14px',
+            flexWrap: 'wrap',
+          }}
+        >
+          {/* Brand */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
               style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: apiHealthy ? 'var(--s)' : 'var(--d)',
-              }}
-            />
-            {apiHealthy ? `API OK${apiLatencyMs !== null ? ` · ${apiLatencyMs}ms` : ''}` : 'API OFFLINE'}
-          </div>
-        </div>
-
-        {/* Navigation Tabs */}
-        <nav style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {(
-            [
-              { id: 'desk', label: '🖥️ โต๊ะปฏิบัติการ (Desk)' },
-              { id: 'bots', label: `🤖 บอททั้งหมด (Bots · ${fleetSummary?.total || 14})` },
-              { id: 'scan', label: '📷 สแกนสลิป (Scan OCR)' },
-              { id: 'messages', label: '💬 ข้อความบอท (Messages)' },
-              { id: 'settings', label: '⚙️ ตั้งค่า API & บอท (Settings)' },
-              { id: 'design', label: '🎨 ดีไซน์ (Design)' },
-            ] as { id: MainTab; label: string }[]
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
-              style={{
-                padding: '8px 13px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === t.id ? '1px solid var(--cb)' : '1px solid var(--br)',
-                background: activeTab === t.id ? 'var(--ca)' : 'var(--b2)',
-                color: activeTab === t.id ? 'var(--c)' : 'var(--t2)',
-                transition: 'all 0.15s',
+                width: '34px',
+                height: '34px',
+                borderRadius: '10px',
+                background: 'var(--ca)',
+                border: '1px solid var(--cb)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              {t.label}
+              <CeIcon name="gem" size={18} color="var(--c)" />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '1.2px', color: 'var(--t1)' }}>
+                  CE VAULT
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    background: 'var(--ga)',
+                    color: 'var(--g)',
+                    fontFamily: "'Space Mono', monospace",
+                  }}
+                >
+                  {summary?.cycle || 'CE44'}
+                </span>
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--t3)' }}>โต๊ะแลกเปลี่ยน (Operator Desk)</div>
+            </div>
+          </div>
+
+          {/* 4 Clean Primary Navigation Tabs */}
+          <nav
+            style={{
+              display: 'flex',
+              gap: '4px',
+              background: 'var(--b1)',
+              padding: '4px',
+              borderRadius: '12px',
+              border: '1px solid var(--br)',
+              flexWrap: 'wrap',
+            }}
+          >
+            {(
+              [
+                { id: 'desk', label: 'หน้าหลัก (Desk)' },
+                { id: 'scan', label: 'รับสลิป (Scan)' },
+                { id: 'bots', label: `บอททั้งหมด (${fleetSummary?.total || 14})` },
+                { id: 'settings', label: 'ตั้งค่า (Settings)' },
+              ] as { id: MainTab; label: string }[]
+            ).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                style={{
+                  padding: '7px 15px',
+                  borderRadius: '9px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: activeTab === t.id ? 'var(--c)' : 'transparent',
+                  color: activeTab === t.id ? 'var(--b0)' : 'var(--t2)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Compact Live Binance TH + Status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              onClick={handleRefreshMarketNow}
+              title="คลิกเพื่ออัปเดตเรทตลาดสดจาก Binance TH"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                padding: '6px 12px',
+                borderRadius: '10px',
+                background: 'var(--b2)',
+                border: '1px solid var(--br)',
+                color: 'var(--t1)',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: apiHealthy ? 'var(--s)' : 'var(--d)',
+                }}
+              />
+              <span style={{ color: 'var(--t3)', fontSize: '11px' }}>Binance TH</span>
+              <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
+                {market?.rate ? market.rate.toFixed(2) : '—'}
+              </strong>
             </button>
-          ))}
-        </nav>
+          </div>
+        </div>
       </header>
 
-      {/* ── TOAST NOTIFICATION ── */}
+      {/* ── TOAST ── */}
       {toast && (
         <div
           style={{
             position: 'fixed',
-            bottom: '24px',
-            right: '24px',
+            bottom: '22px',
+            right: '22px',
             zIndex: 100,
             background: 'var(--b3)',
             border: '1px solid var(--cb)',
             color: 'var(--t1)',
             padding: '12px 18px',
-            borderRadius: '10px',
-            boxShadow: '0 12px 32px rgba(0,0,0,0.55)',
-            fontSize: '12px',
+            borderRadius: '12px',
+            boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
+            fontSize: '13px',
             fontWeight: 600,
-            maxWidth: '460px',
+            maxWidth: '420px',
           }}
         >
           {toast}
         </div>
       )}
 
-      {/* ── MAIN CONTENT ── */}
-      <main style={{ flex: 1, maxWidth: '1440px', width: '100%', margin: '0 auto', padding: '20px 24px' }}>
+      {/* ── MAIN CONTAINER ── */}
+      <main style={{ flex: 1, maxWidth: '1280px', width: '100%', margin: '0 auto', padding: '20px' }}>
         {/* ═══════════════════════════════════════════════════════ */}
-        {/* TAB 1: OPERATOR DESK */}
+        {/* TAB 1: หน้าหลัก (SIMPLE & CLEAN OPERATOR DESK) */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeTab === 'desk' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* KPI GRID */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: '12px',
-              }}
-            >
-              <KpiCard
-                label="ยอดรับวันนี้ (Received Today)"
-                value={fmtInt(summary?.receivedThb || 0)}
-                unit="THB"
-                note={`วงเงินรอบนี้ (Limit): ${fmtInt(summary?.limitThb || 500000)} THB (${summary?.usedPercent || 0}%)`}
-                color="green"
-                progress={summary?.usedPercent || 0}
-                icon={<CeIcon name="receive" size={14} color="#00e676" />}
-              />
-              <KpiCard
-                label="วงเงินคงเหลือ (Remaining Limit)"
-                value={fmtInt(summary?.remainingThb || 0)}
-                unit="THB"
-                note={`บัญชีหลัก (PIN): ${summary?.pinnedBank.code || 'BBL'} · ${summary?.pinnedBank.account || ''}`}
-                color="cyan"
-                progress={100 - (summary?.usedPercent || 0)}
-                icon={<CeIcon name="limit" size={14} color="#00d4ff" />}
-              />
-              <KpiCard
-                label="โอนเหรียญแล้ว (USDT Sent)"
-                value={fmtUsdt(summary?.sentUsdt || 0)}
-                unit="USDT"
-                note={`สำเร็จแล้ว (Settled): ${summary?.counts?.SETTLED || 0} รายการ (items)`}
-                color="cyan"
-                icon={<CeIcon name="send" size={14} color="#00d4ff" />}
-              />
-              <KpiCard
-                label="รอโอนเหรียญ (Pending USDT)"
-                value={fmtUsdt(summary?.pendingUsdt || 0)}
-                unit="USDT"
-                note={`พร้อมโอน (Ready): ${summary?.counts?.READY || 0} · รอคิว (Pending): ${summary?.counts?.PENDING || 0}`}
-                color="yellow"
-                icon={<CeIcon name="pending" size={14} color="#ffca28" />}
-              />
-              <KpiCard
-                label="ยอดส่งขาด (Shortfall USDT)"
-                value={fmtUsdt(summary?.negativeUsdt || 0)}
-                unit="USDT"
-                note={`รอโอนชดเชย (Short Items): ${summary?.counts?.SHORT || 0} รายการ`}
-                color="red"
-                icon={<CeIcon name="short" size={14} color="#ff5252" />}
-              />
-              <KpiCard
-                label="กำไรรอบนี้ (Cycle Profit)"
-                value={fmtThb(summary?.profitThb || 0)}
-                unit="THB"
-                note={`เรทโต๊ะ (Desk) ${summary?.rate.toFixed(2) || '43.00'} · ตลาด (MKT) ${summary?.marketRate.toFixed(2) || '42.65'}`}
-                color="gold"
-                icon={<CeIcon name="profit" size={14} color="#f0b429" />}
-              />
-            </div>
+            {/* HERO ROW: 2 CLEAN CARDS (PINNED BANK + RATE & SUMMARY) */}
+            <div className="ce-hero-grid">
+              {/* CARD A: บัญชีรับเงินวันนี้ (WITH REAL THAI BANK LOGO) */}
+              <div
+                style={{
+                  background: 'var(--b2)',
+                  border: '1px solid var(--br)',
+                  borderRadius: '18px',
+                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <BankLogo code={summary?.pinnedBank.code || 'KBANK'} size={52} />
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600 }}>
+                        📌 บัญชีรับเงินวันนี้ (Today's PIN)
+                      </div>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--t1)', marginTop: '2px' }}>
+                        {pinnedAsset.thai} ({summary?.pinnedBank.code || 'BBL'})
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--c)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+                        {summary?.pinnedBank.account || '097-0-28xxx-x'} · <span style={{ color: 'var(--t2)', fontFamily: 'inherit', fontWeight: 500 }}>{summary?.pinnedBank.holder || ''}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <CeButton
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setPanelMode('pin')}
+                    icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
+                  >
+                    เปลี่ยนบัญชี (Smart PIN)
+                  </CeButton>
+                </div>
 
-            {/* QUICK OPERATOR BAR */}
-            <div
-              style={{
-                background: 'var(--b2)',
-                border: '1px solid var(--br)',
-                borderRadius: '14px',
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <CeButton
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setActiveTab('scan')}
-                  icon={<CeIcon name="scan" size={14} color="var(--b0)" />}
-                >
-                  รับสลิปใหม่ (Scan Slip)
-                </CeButton>
-                <CeButton
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setStatusFilter('PENDING');
-                    setPanelMode('tx');
-                  }}
-                  icon={<CeIcon name="pending" size={14} color="var(--c)" />}
-                >
-                  คิวรอโอน (Pending: {summary?.counts?.PENDING || 0})
-                </CeButton>
-                <CeButton
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPanelMode('summary')}
-                  icon={<CeIcon name="profit" size={14} color="var(--c)" />}
-                >
-                  สรุปรอบงาน (Summary · {summary?.cycle || 'CE44'})
-                </CeButton>
-                <CeButton
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPanelMode('pin')}
-                  icon={<CeIcon name="bank" size={14} color="var(--g)" />}
-                >
-                  📌 ปักหมุดบัญชี (Bank PIN · {summary?.pinnedBank.code || 'BBL'})
-                </CeButton>
-                <CeButton
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPanelMode('rate')}
-                  icon={<CeIcon name="rate" size={14} color="var(--g)" />}
-                >
-                  💱 ตั้งเรท (Rate · {summary?.rate.toFixed(2) || '43.00'})
-                </CeButton>
-                <CeButton
-                  variant="gold"
-                  size="sm"
-                  onClick={() => setPanelMode('cycle')}
-                  icon={<CeIcon name="cycle" size={14} color="var(--b0)" />}
-                >
-                  🔄 เปิดรอบใหม่ (New Cycle)
-                </CeButton>
+                {/* Clean Limit Progress Bar */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                    <span style={{ color: 'var(--t2)' }}>
+                      ใช้ไป <strong style={{ color: 'var(--t1)', fontFamily: "'Space Mono', monospace" }}>฿{fmtInt(summary?.usedThb || 0)}</strong> / ฿{fmtInt(summary?.limitThb || 500000)}
+                    </span>
+                    <span style={{ color: 'var(--s)', fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>
+                      เหลือ ฿{fmtInt(summary?.remainingThb || 0)} ({summary?.usedPercent || 0}%)
+                    </span>
+                  </div>
+                  <div style={{ height: '7px', background: 'var(--b1)', borderRadius: '9999px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${Math.min(100, summary?.usedPercent || 0)}%`,
+                        height: '100%',
+                        background: (summary?.usedPercent || 0) >= 85 ? '#ff5252' : 'linear-gradient(90deg, #3fe0ff, #44d895)',
+                        borderRadius: '9999px',
+                        transition: 'width 0.3s ease',
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <CeButton
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setActiveTab('settings')}
-                  icon={<CeIcon name="bot" size={13} color="var(--c)" />}
-                >
-                  ตั้งค่า API & บอท (Bot Settings)
-                </CeButton>
-                <CeButton
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleResetDemo}
-                  loading={loadingAction === 'reset'}
-                  icon={<CeIcon name="refresh" size={13} color="var(--t2)" />}
-                >
-                  รีเซ็ตตัวอย่าง (Reset Demo)
-                </CeButton>
+              {/* CARD B: เรทโต๊ะ & สรุปยอดวันนี้ */}
+              <div
+                style={{
+                  background: 'var(--b2)',
+                  border: '1px solid var(--br)',
+                  borderRadius: '18px',
+                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600 }}>💱 เรทโต๊ะ (Desk Rate)</div>
+                      <div style={{ fontSize: '26px', fontWeight: 800, color: 'var(--g)', fontFamily: "'Space Mono', monospace", lineHeight: 1.15 }}>
+                        {summary ? summary.rate.toFixed(2) : '34.23'} <span style={{ fontSize: '12px', fontWeight: 500 }}>THB</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
+                      ตลาด Binance TH: <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>{market?.rate ? market.rate.toFixed(2) : '—'}</strong>
+                      <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--t3)' }}>({market?.rateMode === 'auto' ? 'AUTO' : 'MANUAL'})</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <CeButton variant="outline" size="sm" onClick={() => setPanelMode('rate')}>
+                      ปรับเรท
+                    </CeButton>
+                    <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('cycle')}>
+                      ปิดรอบ {summary?.cycle || 'CE44'}
+                    </CeButton>
+                  </div>
+                </div>
+
+                {/* Clean 4-Metric Summary Strip */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', paddingTop: '12px', borderTop: '1px solid var(--br)' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>รับเงินสด (THB)</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--s)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
+                      ฿{fmtInt(summary?.receivedThb || 0)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>โอนแล้ว (USDT)</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--c)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
+                      {fmtUsdt(summary?.sentUsdt || 0)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>ค้างส่ง / ขาด</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: (summary?.shortUsdt || 0) > 0 ? '#ff5252' : 'var(--w)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
+                      {fmtUsdt((summary?.pendingUsdt || 0) + (summary?.shortUsdt || 0))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>กำไรรอบนี้</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--g)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
+                      ฿{fmtInt(summary?.profitThb || 0)}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* TWO-COLUMN WORKSPACE */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(340px, 1.15fr) minmax(360px, 1fr)',
-                gap: '20px',
-                alignItems: 'start',
-              }}
-            >
-              {/* LEFT: TRANSACTION QUEUE */}
+            {/* WORKSPACE ROW: LEFT QUEUE + RIGHT CLEAR ACTION PANEL */}
+            <div className="ce-workspace-grid">
+              {/* LEFT: CLEAN TRANSACTION QUEUE */}
               <div
                 style={{
                   background: 'var(--b1)',
                   border: '1px solid var(--br)',
-                  borderRadius: '14px',
-                  padding: '16px',
+                  borderRadius: '18px',
+                  padding: '18px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '14px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.8px', color: 'var(--c)' }}>
-                    รายการธุรกรรม (Transaction Queue · {filteredTransactions.length})
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--t1)' }}>
+                      รายการวันนี้ ({filteredTransactions.length})
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>คลิกรายการเพื่อโอนเหรียญหรืออนุมัติ</div>
                   </div>
-                  {/* Status Filter Chips */}
-                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                    {(['ALL', 'READY', 'PENDING', 'SHORT', 'MISMATCH', 'REVIEW', 'SETTLED'] as const).map((st) => (
-                      <button
-                        key={st}
-                        onClick={() => setStatusFilter(st)}
-                        style={{
-                          padding: '4px 9px',
-                          borderRadius: '9999px',
-                          fontSize: '9px',
-                          fontWeight: 700,
-                          letterSpacing: '0.8px',
-                          cursor: 'pointer',
-                          border: statusFilter === st ? '1px solid var(--cb)' : '1px solid var(--br)',
-                          background: statusFilter === st ? 'var(--ca)' : 'var(--b2)',
-                          color: statusFilter === st ? 'var(--c)' : 'var(--t3)',
-                        }}
-                      >
-                        {st === 'ALL' ? 'ทั้งหมด (ALL)' : st}
-                      </button>
-                    ))}
-                  </div>
+                  <CeButton
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setActiveTab('scan')}
+                    icon={<CeIcon name="scan" size={14} color="var(--b0)" />}
+                  >
+                    + รับสลิปใหม่
+                  </CeButton>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {filteredTransactions.map((tx) => (
-                    <div
-                      key={tx.id}
+                {/* Simple 4 Filter Tabs */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {(
+                    [
+                      { id: 'ALL', label: `ทั้งหมด (${transactions.length})` },
+                      { id: 'ACTION', label: `ต้องจัดการ (${actionNeededCount})` },
+                      { id: 'PENDING', label: `รอโอน (${summary?.counts?.PENDING || 0})` },
+                      { id: 'SETTLED', label: `เสร็จแล้ว (${summary?.counts?.SETTLED || 0})` },
+                    ] as { id: SimpleQueueFilter; label: string }[]
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setQueueFilter(f.id)}
                       style={{
-                        borderRadius: '11px',
-                        outline: selectedTx?.id === tx.id && panelMode === 'tx' ? '1.5px solid var(--c)' : 'none',
+                        padding: '6px 12px',
+                        borderRadius: '9999px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: queueFilter === f.id ? '1px solid var(--cb)' : '1px solid var(--br)',
+                        background: queueFilter === f.id ? 'var(--ca)' : 'var(--b2)',
+                        color: queueFilter === f.id ? 'var(--c)' : 'var(--t2)',
                       }}
                     >
-                      <TxItem
-                        id={tx.id}
-                        thb={fmtThb(tx.thb)}
-                        usdt={fmtUsdt(tx.usdtExpected)}
-                        bank={tx.bank}
-                        sender={tx.sender}
-                        time={tx.time}
-                        status={tx.status}
-                        onClick={() => {
-                          setSelectedTxId(tx.id);
-                          setPanelMode('tx');
-                        }}
-                      />
-                    </div>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Queue List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {filteredTransactions.map((tx) => (
+                    <TxItem
+                      key={tx.id}
+                      id={tx.id}
+                      thb={fmtThb(tx.thb)}
+                      usdt={fmtUsdt(tx.usdtExpected)}
+                      bank={tx.bank}
+                      sender={tx.sender}
+                      time={tx.time}
+                      status={tx.status}
+                      selected={selectedTx?.id === tx.id && panelMode === 'tx'}
+                      onClick={() => {
+                        setSelectedTxId(tx.id);
+                        setPanelMode('tx');
+                      }}
+                    />
                   ))}
                   {filteredTransactions.length === 0 && (
-                    <div style={{ padding: '32px', textAlign: 'center', color: 'var(--t3)', fontSize: '12px' }}>
-                      ไม่มีรายการในสถานะนี้ (No transactions in {statusFilter})
+                    <div style={{ padding: '36px', textAlign: 'center', color: 'var(--t3)', fontSize: '13px' }}>
+                      ไม่มีรายการในหมวดนี้ (Empty)
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* RIGHT: INTERACTIVE SCREEN FOR SELECTED TX OR DESK SETTING */}
+              {/* RIGHT: FOCUSED ACTION PANEL */}
               <div
                 style={{
                   background: 'var(--b2)',
                   border: '1px solid var(--br)',
-                  borderRadius: '14px',
-                  padding: '20px',
+                  borderRadius: '18px',
+                  padding: '22px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '16px',
+                  gap: '18px',
                   position: 'sticky',
                   top: '76px',
                 }}
               >
-                {/* MODE 1: TRANSACTION INSPECTOR & ACTION WORKFLOW */}
+                {/* ── MODE 1: SELECTED TRANSACTION ── */}
                 {panelMode === 'tx' && selectedTx && (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <div style={{ fontSize: '10px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>
-                          {selectedTx.id} · {selectedTx.time} น.
-                        </div>
-                        <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--t1)', marginTop: '2px' }}>
-                          {selectedTx.status === 'MISMATCH' && 'ตรวจสอบบัญชีไม่ตรง (Bank Account Mismatch)'}
-                          {selectedTx.status === 'SHORT' && 'โอนชดเชยยอดขาด (Shortfall Recovery)'}
-                          {(selectedTx.status === 'READY' || selectedTx.status === 'PENDING') && 'บันทึกการโอนเหรียญ (USDT Settlement)'}
-                          {selectedTx.status === 'SETTLED' && 'โอนเหรียญสำเร็จครบถ้วน (Settlement Completed ✓)'}
-                          {(selectedTx.status === 'REVIEW' || selectedTx.status === 'OCR') && 'ตรวจสอบสลิปด้วยตนเอง (Manual OCR Review)'}
-                          {(selectedTx.status === 'REJECTED' || selectedTx.status === 'REVERSED' || selectedTx.status === 'DUPLICATE') &&
-                            `รายละเอียดรายการ (Transaction · ${selectedTx.status})`}
+                    {/* Header with Real Bank Logo */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <BankLogo code={selectedTx.bank} size={46} />
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>
+                            {selectedTx.id} · {selectedTx.slipDate || `${selectedTx.time} น.`}
+                          </div>
+                          <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--t1)', fontFamily: "'Space Mono', monospace" }}>
+                            ฿{fmtThb(selectedTx.thb)}
+                          </div>
                         </div>
                       </div>
                       <StatusBadge status={selectedTx.status} />
                     </div>
 
-                    {/* Core details card */}
+                    {/* Clean Key Details */}
                     <div
                       style={{
-                        background: 'var(--b3)',
-                        border: '1px solid var(--br)',
-                        borderRadius: '10px',
-                        padding: '14px',
+                        background: 'var(--b1)',
+                        borderRadius: '14px',
+                        padding: '15px',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '8px',
-                        fontSize: '12px',
+                        gap: '10px',
+                        fontSize: '13px',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>📥 ยอดรับโอน (Received THB)</span>
-                        <strong style={{ color: 'var(--s)', fontFamily: "'Space Mono', monospace" }}>
-                          ฿{fmtThb(selectedTx.thb)}
-                        </strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>💎 ยอดต้องโอน (Expected USDT)</span>
-                        <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
+                        <span style={{ color: 'var(--t3)' }}>ยอดต้องโอน (Expected)</span>
+                        <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace", fontSize: '15px' }}>
                           {fmtUsdt(selectedTx.usdtExpected)} USDT
                         </strong>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>📤 โอนแล้วสะสม (Sent Total)</span>
-                        <strong style={{ color: 'var(--t1)', fontFamily: "'Space Mono', monospace" }}>
+                        <span style={{ color: 'var(--t3)' }}>โอนไปแล้ว (Sent)</span>
+                        <strong style={{ color: 'var(--s)', fontFamily: "'Space Mono', monospace" }}>
                           {fmtUsdt(selectedTx.usdtSent)} USDT
                         </strong>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>🏦 บัญชีในสลิป (Slip Account)</span>
+                        <span style={{ color: 'var(--t3)' }}>บัญชีสลิป (Slip Bank)</span>
                         <strong
                           style={{
-                            color: selectedTx.bank.toUpperCase() === summary?.pinnedBank.code.toUpperCase() ? 'var(--s)' : 'var(--al)',
+                            color: selectedTx.bank.toUpperCase() === summary?.pinnedBank.code.toUpperCase() ? 'var(--s)' : '#ff6d35',
                             fontFamily: "'Space Mono', monospace",
                           }}
                         >
-                          {selectedTx.bank} · {selectedTx.account}
+                          {resolveBankAsset(selectedTx.bank).thai} ({selectedTx.bank}) · {selectedTx.account}
                         </strong>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>👤 ผู้โอน / ลูกค้า (Sender / Client)</span>
+                        <span style={{ color: 'var(--t3)' }}>ผู้โอน (Sender)</span>
                         <span>{selectedTx.sender}</span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>🔎 ความแม่นยำ (OCR Confidence)</span>
-                        <span style={{ fontFamily: "'Space Mono', monospace", color: selectedTx.confidence >= 80 ? 'var(--s)' : 'var(--w)' }}>
-                          {selectedTx.confidence}%
-                        </span>
-                      </div>
                       {selectedTx.notes && (
-                        <div
-                          style={{
-                            marginTop: '4px',
-                            paddingTop: '8px',
-                            borderTop: '1px solid var(--br)',
-                            fontSize: '11px',
-                            color: 'var(--t2)',
-                          }}
-                        >
+                        <div style={{ paddingTop: '10px', borderTop: '1px solid var(--br)', fontSize: '12px', color: 'var(--t2)' }}>
                           ℹ️ {selectedTx.notes}
                         </div>
                       )}
                     </div>
 
-                    {/* SCREEN 03: MISMATCH FLOW */}
+                    {/* MISMATCH FLOW WITH VISUAL BANK LOGO COMPARISON */}
                     {selectedTx.status === 'MISMATCH' && (
                       <div
                         style={{
-                          background: 'var(--ala)',
-                          border: '1px solid var(--alb)',
-                          borderRadius: '10px',
-                          padding: '14px',
+                          background: 'rgba(255, 109, 53, 0.08)',
+                          border: '1px solid rgba(255, 109, 53, 0.35)',
+                          borderRadius: '14px',
+                          padding: '16px',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '10px',
+                          gap: '12px',
                         }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                          <div>
-                            <div style={{ fontSize: '9px', color: 'var(--t3)', textTransform: 'uppercase' }}>บัญชีสลิป (Slip Account)</div>
-                            <strong style={{ color: 'var(--al)' }}>
-                              {selectedTx.bank} · {selectedTx.account}
-                            </strong>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <BankLogo code={selectedTx.bank} size={38} />
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--t3)' }}>ในสลิป (Slip)</div>
+                              <strong style={{ color: '#ff6d35', fontSize: '13px' }}>{selectedTx.bank}</strong>
+                            </div>
                           </div>
-                          <span style={{ fontSize: '16px', color: 'var(--al)', fontWeight: 800 }}>≠</span>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '9px', color: 'var(--t3)', textTransform: 'uppercase' }}>บัญชีหลักวันนี้ (Today PIN)</div>
-                            <strong style={{ color: 'var(--s)' }}>
-                              {summary?.pinnedBank.code} · {summary?.pinnedBank.account}
-                            </strong>
+                          <span style={{ fontSize: '20px', fontWeight: 800, color: '#ff6d35' }}>≠</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '10px', color: 'var(--t3)' }}>บัญชี PIN วันนี้</div>
+                              <strong style={{ color: 'var(--s)', fontSize: '13px' }}>{summary?.pinnedBank.code}</strong>
+                            </div>
+                            <BankLogo code={summary?.pinnedBank.code} size={38} />
                           </div>
                         </div>
 
-                        <div>
-                          <label style={{ fontSize: '10px', color: 'var(--t3)', display: 'block', marginBottom: '4px' }}>
-                            เหตุผลการอนุมัติพิเศษ (Override Reason · Audit Log):
-                          </label>
-                          <input
-                            value={overrideReason}
-                            onChange={(e) => setOverrideReason(e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '8px 10px',
-                              borderRadius: '8px',
-                              background: 'var(--b1)',
-                              border: '1px solid var(--br)',
-                              color: 'var(--t1)',
-                              fontSize: '12px',
-                            }}
-                          />
-                        </div>
+                        <input
+                          className="ce-input"
+                          value={overrideReason}
+                          onChange={(e) => setOverrideReason(e.target.value)}
+                          placeholder="เหตุผลอนุมัติพิเศษ (Override Reason)"
+                        />
 
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <CeButton
+                            variant="warning"
+                            fullWidth
+                            onClick={() => handleTxAction(selectedTx.id, 'override', { reason: overrideReason })}
+                            loading={loadingAction === `${selectedTx.id}:override`}
+                          >
+                            ⚡ อนุมัติพิเศษ (Override → Ready)
+                          </CeButton>
                           <CeButton
                             variant="outline"
                             size="sm"
                             onClick={() => handleTxAction(selectedTx.id, 'recheck')}
                             loading={loadingAction === `${selectedTx.id}:recheck`}
-                            icon={<CeIcon name="recheck" size={14} />}
                           >
                             ตรวจซ้ำ (Recheck)
                           </CeButton>
                           <CeButton
-                            variant="warning"
-                            size="sm"
-                            onClick={() => handleTxAction(selectedTx.id, 'override', { reason: overrideReason })}
-                            loading={loadingAction === `${selectedTx.id}:override`}
-                            icon={<CeIcon name="override" size={14} color="var(--b0)" />}
-                          >
-                            ⚡ อนุมัติพิเศษ (Override → Ready)
-                          </CeButton>
-                          <CeButton
                             variant="danger"
                             size="sm"
-                            onClick={() => handleTxAction(selectedTx.id, 'reject', { reason: 'บัญชีไม่ตรง (Bank Mismatch)' })}
+                            onClick={() => handleTxAction(selectedTx.id, 'reject', { reason: 'บัญชีไม่ตรง' })}
                             loading={loadingAction === `${selectedTx.id}:reject`}
                           >
-                            ❌ ปฏิเสธ (Reject)
+                            ปฏิเสธ (Reject)
                           </CeButton>
                         </div>
                       </div>
                     )}
 
-                    {/* SCREEN 02: REVIEW / OCR CONFIRMATION */}
+                    {/* REVIEW / DATE MISMATCH FLOW */}
                     {(selectedTx.status === 'REVIEW' || selectedTx.status === 'OCR') && (
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         <CeButton
                           variant="success"
-                          size="sm"
                           fullWidth
                           onClick={() => handleTxAction(selectedTx.id, 'confirm')}
                           loading={loadingAction === `${selectedTx.id}:confirm`}
-                          icon={<CeIcon name="check" size={14} color="var(--b0)" />}
+                          icon={<CeIcon name="check" size={15} color="var(--b0)" />}
                         >
-                          ✓ ยืนยันข้อมูลถูกต้อง (Confirm → Ready)
+                          ✓ ยืนยันสลิปถูกต้อง (Confirm → Ready)
                         </CeButton>
                         <CeButton
                           variant="danger"
                           size="sm"
                           fullWidth
-                          onClick={() => handleTxAction(selectedTx.id, 'reject', { reason: 'สลิปไม่ผ่านการตรวจสอบ (OCR Rejected)' })}
+                          onClick={() => handleTxAction(selectedTx.id, 'reject', { reason: 'สลิปไม่ผ่านการตรวจสอบ' })}
                           loading={loadingAction === `${selectedTx.id}:reject`}
                         >
-                          ❌ ปฏิเสธรายการ (Reject Transaction)
+                          ❌ ปฏิเสธรายการ (Reject)
                         </CeButton>
                       </div>
                     )}
 
-                    {/* SCREEN 04 & 05: SETTLEMENT & SHORT RECOVERY */}
+                    {/* SETTLEMENT / SHORT RECOVERY */}
                     {(selectedTx.status === 'READY' || selectedTx.status === 'PENDING' || selectedTx.status === 'SHORT') && (
-                      <div
-                        style={{
-                          background: selectedTx.status === 'SHORT' ? 'var(--da)' : 'var(--b3)',
-                          border: `1px solid ${selectedTx.status === 'SHORT' ? 'var(--db)' : 'var(--cb)'}`,
-                          borderRadius: '10px',
-                          padding: '14px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '10px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--c)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                          <span style={{ color: selectedTx.status === 'SHORT' ? '#ff5252' : 'var(--t2)', fontWeight: 700 }}>
                             {selectedTx.status === 'SHORT'
-                              ? `▼ ยอดส่งขาด (Shortfall): ${fmtUsdt(selectedTx.usdtExpected - selectedTx.usdtSent)} USDT`
-                              : `📤 บันทึกส่ง USDT (คงเหลือ · Remaining ${fmtUsdt(selectedTx.usdtExpected - selectedTx.usdtSent)} USDT)`}
+                              ? `ยอดส่งขาด (Shortfall): ${fmtUsdt(selectedTx.usdtExpected - selectedTx.usdtSent)} USDT`
+                              : `ยอดโอนครั้งนี้ (Remaining: ${fmtUsdt(selectedTx.usdtExpected - selectedTx.usdtSent)} USDT)`}
                           </span>
-                          <span style={{ fontSize: '11px', fontFamily: "'Space Mono', monospace", color: 'var(--t2)' }}>
-                            {Math.min(100, Number(((selectedTx.usdtSent / selectedTx.usdtExpected) * 100).toFixed(1)))}%
-                          </span>
+                          <button
+                            onClick={() =>
+                              setSettleAmount(
+                                String(Number(Math.max(1, selectedTx.usdtExpected - selectedTx.usdtSent - 2.56).toFixed(2)))
+                              )
+                            }
+                            style={{ background: 'none', border: 'none', color: 'var(--t3)', fontSize: '11px', cursor: 'pointer', textDecoration: 'underline' }}
+                          >
+                            จำลองส่งขาด (-2.56)
+                          </button>
                         </div>
 
-                        <div style={{ height: '5px', background: 'var(--b1)', borderRadius: '9999px', overflow: 'hidden' }}>
-                          <div
-                            style={{
-                              width: `${Math.min(100, (selectedTx.usdtSent / selectedTx.usdtExpected) * 100)}%`,
-                              height: '100%',
-                              background: 'linear-gradient(90deg, var(--c), var(--g))',
-                            }}
-                          />
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                           <input
+                            className="ce-input"
                             type="number"
                             step="0.01"
                             value={settleAmount}
                             onChange={(e) => setSettleAmount(e.target.value)}
-                            style={{
-                              flex: 1,
-                              padding: '9px 12px',
-                              borderRadius: '8px',
-                              background: 'var(--b1)',
-                              border: '1px solid var(--br)',
-                              color: 'var(--t1)',
-                              fontFamily: "'Space Mono', monospace",
-                              fontSize: '13px',
-                              fontWeight: 700,
-                            }}
+                            style={{ fontFamily: "'Space Mono', monospace", fontSize: '16px', fontWeight: 700 }}
                           />
-                          <span style={{ fontSize: '11px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>USDT</span>
+                          <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: 'var(--c)' }}>USDT</span>
                         </div>
 
-                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                          {selectedTx.status === 'READY' && (
-                            <CeButton
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleTxAction(selectedTx.id, 'queue')}
-                              loading={loadingAction === `${selectedTx.id}:queue`}
-                            >
-                              ⏳ เข้าคิวรอโอน (Queue Pending)
-                            </CeButton>
-                          )}
-                          <CeButton
-                            variant="success"
-                            size="sm"
-                            onClick={() =>
-                              handleTxAction(
-                                selectedTx.id,
-                                selectedTx.status === 'SHORT' ? 'recover-short' : 'settle',
-                                { usdt: Number(settleAmount) }
-                              )
-                            }
-                            loading={
-                              loadingAction === `${selectedTx.id}:settle` ||
-                              loadingAction === `${selectedTx.id}:recover-short`
-                            }
-                            icon={<CeIcon name="check" size={14} color="var(--b0)" />}
-                          >
-                            {selectedTx.status === 'SHORT'
-                              ? '📤 โอนชดเชยยอดขาด (Recover Short)'
-                              : '✓ ยืนยันการโอนเหรียญ (Submit Settlement)'}
-                          </CeButton>
-                          {selectedTx.status !== 'SHORT' && (
-                            <CeButton
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                setSettleAmount(
-                                  String(Number(Math.max(1, selectedTx.usdtExpected - selectedTx.usdtSent - 2.56).toFixed(2)))
-                                )
-                              }
-                            >
-                              จำลองส่งขาด (Simulate -2.56)
-                            </CeButton>
-                          )}
-                        </div>
+                        <CeButton
+                          variant="success"
+                          size="lg"
+                          fullWidth
+                          onClick={() =>
+                            handleTxAction(
+                              selectedTx.id,
+                              selectedTx.status === 'SHORT' ? 'recover-short' : 'settle',
+                              { usdt: Number(settleAmount) }
+                            )
+                          }
+                          loading={loadingAction === `${selectedTx.id}:settle` || loadingAction === `${selectedTx.id}:recover-short`}
+                          icon={<CeIcon name="check" size={16} color="var(--b0)" />}
+                        >
+                          {selectedTx.status === 'SHORT'
+                            ? 'โอนชดเชยยอดขาด (Recover Short)'
+                            : 'ยืนยันโอนเหรียญ (Submit Settlement)'}
+                        </CeButton>
                       </div>
                     )}
 
-                    {/* SCREEN 07: DONE / SETTLED */}
+                    {/* SETTLED */}
                     {selectedTx.status === 'SETTLED' && (
                       <div
                         style={{
                           background: 'var(--sa)',
                           border: '1px solid var(--sb)',
-                          borderRadius: '10px',
-                          padding: '14px',
+                          borderRadius: '14px',
+                          padding: '15px',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          gap: '8px',
+                          gap: '10px',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <CeIcon name="settled" size={22} color="var(--s)" />
-                          <div>
-                            <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--s)' }}>
-                              โอนครบสมบูรณ์ (SETTLEMENT COMPLETED ✓)
-                            </div>
-                            <div style={{ fontSize: '11px', color: 'var(--t2)' }}>
-                              โอนครบ {fmtUsdt(selectedTx.usdtSent)} USDT เรียบร้อยแล้ว (Full Amount Sent)
-                            </div>
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--s)' }}>โอนเหรียญครบแล้ว ✓</div>
+                          <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
+                            ยอดโอนรวม {fmtUsdt(selectedTx.usdtSent)} USDT
                           </div>
                         </div>
                         <CeButton
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleTxAction(selectedTx.id, 'reverse', { reason: 'ผู้ดูแลระบบสั่งย้อนกลับ (Admin Reverse)' })}
+                          onClick={() => handleTxAction(selectedTx.id, 'reverse', { reason: 'Admin Reverse' })}
                           loading={loadingAction === `${selectedTx.id}:reverse`}
                         >
-                          ↩️ ย้อนกลับ (Reverse)
+                          ย้อนกลับ
                         </CeButton>
                       </div>
                     )}
 
-                    {/* Settlement History Entries */}
-                    {selectedTx.settlements?.length > 0 && (
-                      <div
-                        style={{
-                          background: 'var(--b3)',
-                          border: '1px solid var(--br)',
-                          borderRadius: '10px',
-                          padding: '10px 14px',
-                        }}
-                      >
-                        <div style={{ fontSize: '9px', color: 'var(--t3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' }}>
-                          ประวัติการส่งเหรียญ (Settlement Entries)
-                        </div>
-                        {selectedTx.settlements.map((se) => (
-                          <div
-                            key={se.id}
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              fontSize: '11px',
-                              fontFamily: "'Space Mono', monospace",
-                              padding: '3px 0',
-                            }}
+                    {/* CLEAN COLLAPSIBLE TELEGRAM PREVIEW */}
+                    <div style={{ borderTop: '1px solid var(--br)', paddingTop: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          onClick={() => setShowBotCardPreview((v) => !v)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--t2)',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          {showBotCardPreview ? '▾ ซ่อนการ์ดข้อความ Telegram' : '▸ ดูการ์ดข้อความ Telegram (◈ CE ·)'}
+                        </button>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <CeButton
+                            variant="outline"
+                            size="sm"
+                            loading={loadingAction === `tg-send:tx:${selectedTx.id}`}
+                            onClick={() => handleSendTelegramLive(renderBotMessageForTx(selectedTx), `tx:${selectedTx.id}`)}
                           >
-                            <span style={{ color: 'var(--t2)' }}>
-                              {se.id} · {se.time} น.
-                            </span>
-                            <strong style={{ color: 'var(--c)' }}>{fmtUsdt(se.usdt)} USDT</strong>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Live Telegram Bot Card Output */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '10px', color: 'var(--t3)', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
-                          ตัวอย่างข้อความบอท (Telegram Message Preview)
-                        </span>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <button
-                            onClick={() => handleSendTelegramLive(renderBotMessageForTx(selectedTx), `tx-card:${selectedTx.id}`)}
-                            disabled={loadingAction === `tg-send:tx-card:${selectedTx.id}`}
-                            style={{
-                              background: 'var(--ca)',
-                              border: '1px solid var(--cb)',
-                              borderRadius: '6px',
-                              padding: '4px 9px',
-                              color: 'var(--c)',
-                              fontSize: '10px',
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
-                          >
-                            📨 ส่งเข้า Telegram (Send Live)
-                          </button>
-                          <button
-                            onClick={() => copyText(renderBotMessageForTx(selectedTx), 'คัดลอกข้อความ Telegram แล้ว (Message Copied)')}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: 'var(--c)',
-                              fontSize: '11px',
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
-                          >
-                            📋 คัดลอก (Copy)
-                          </button>
+                            📨 ส่งเข้า Telegram
+                          </CeButton>
+                          <CeButton variant="ghost" size="sm" onClick={() => copyText(renderBotMessageForTx(selectedTx))}>
+                            คัดลอก
+                          </CeButton>
                         </div>
                       </div>
-                      <pre
-                        style={{
-                          margin: 0,
-                          padding: '12px',
-                          borderRadius: '10px',
-                          background: 'var(--b0)',
-                          border: '1px solid var(--br)',
-                          color: 'var(--t1)',
-                          fontFamily: "'Space Mono', monospace",
-                          fontSize: '11px',
-                          lineHeight: 1.55,
-                          whiteSpace: 'pre-wrap',
-                        }}
-                      >
-                        {renderBotMessageForTx(selectedTx)}
-                      </pre>
+                      {showBotCardPreview && (
+                        <pre
+                          style={{
+                            margin: '12px 0 0',
+                            padding: '14px',
+                            borderRadius: '12px',
+                            background: 'var(--b0)',
+                            border: '1px solid var(--br)',
+                            color: 'var(--t1)',
+                            fontFamily: "'Space Mono', monospace",
+                            fontSize: '12px',
+                            lineHeight: 1.6,
+                            whiteSpace: 'pre-wrap',
+                          }}
+                        >
+                          {renderBotMessageForTx(selectedTx)}
+                        </pre>
+                      )}
                     </div>
                   </>
                 )}
 
-                {/* MODE 2: SCREEN 06 SUMMARY */}
-                {panelMode === 'summary' && summary && (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--c)' }}>
-                        สรุปภาพรวมรอบงาน (Cycle Summary · {summary.cycle})
-                      </div>
-                      <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>
-                        ← กลับคิวงาน (Back)
-                      </CeButton>
-                    </div>
-                    <div
-                      style={{
-                        background: 'var(--b3)',
-                        border: '1px solid var(--br)',
-                        borderRadius: '10px',
-                        padding: '14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                        fontSize: '12px',
-                        fontFamily: "'Space Mono', monospace",
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>💳 วงเงินรอบนี้ (LIMIT)</span>
-                        <strong>{fmtInt(summary.limitThb)} THB</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>📊 ใช้ไปแล้ว (USED)</span>
-                        <strong>{fmtInt(summary.usedThb)} THB</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>🟢 คงเหลือ (REMAINING)</span>
-                        <strong style={{ color: 'var(--s)' }}>{fmtInt(summary.remainingThb)} THB</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>📥 ยอดรับสะสม (RECEIVED)</span>
-                        <strong style={{ color: 'var(--s)' }}>{fmtInt(summary.receivedThb)} THB</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>📤 โอนแล้ว (USDT SENT)</span>
-                        <strong style={{ color: 'var(--c)' }}>{fmtUsdt(summary.sentUsdt)} USDT</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>⏳ รอโอน (PENDING)</span>
-                        <strong style={{ color: 'var(--w)' }}>{fmtUsdt(summary.pendingUsdt)} USDT</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>🔴 ยอดส่งขาด (SHORTFALL)</span>
-                        <strong style={{ color: 'var(--d)' }}>{fmtUsdt(summary.negativeUsdt)} USDT</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>✨ กำไรรอบนี้ (PROFIT)</span>
-                        <strong style={{ color: 'var(--g)' }}>{fmtThb(summary.profitThb)} THB</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--t3)' }}>💱 เรทโต๊ะ (DESK RATE)</span>
-                        <strong style={{ color: 'var(--g)' }}>{summary.rate.toFixed(2)} THB</strong>
-                      </div>
-                    </div>
-                    <CeButton
-                      variant="outline"
-                      size="sm"
-                      icon={<CeIcon name="send" size={13} color="var(--c)" />}
-                      loading={loadingAction === 'tg-send:cycle-summary'}
-                      onClick={() =>
-                        handleSendTelegramLive(
-                          MSG.CYCLE_SUMMARY({
-                            cycle_current: summary.cycle,
-                            limit: fmtInt(summary.limitThb),
-                            used: fmtInt(summary.usedThb),
-                            remaining: fmtInt(summary.remainingThb),
-                            thb: fmtInt(summary.receivedThb),
-                            usdt: fmtUsdt(summary.sentUsdt),
-                            usdt_expected: fmtUsdt(summary.pendingUsdt),
-                            usdt_short: fmtUsdt(summary.shortUsdt),
-                            profit: fmtThb(summary.profitThb),
-                            rate: summary.rate.toFixed(2),
-                          }),
-                          'cycle-summary'
-                        )
-                      }
-                    >
-                      📨 ส่งสรุปรอบนี้เข้า Telegram (Send Cycle Summary)
-                    </CeButton>
-                  </>
-                )}
-
-                {/* MODE 3: SMART BANK PIN MANAGER */}
+                {/* ── MODE 2: SMART PIN AUTO-FORMATTER ── */}
                 {panelMode === 'pin' && summary && (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--g)' }}>
-                        📌 ระบบ PIN อัจฉริยะ (Smart Auto-Format PIN)
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--t1)' }}>
+                        📌 ปักหมุดบัญชีอัจฉริยะ (Smart PIN)
                       </div>
                       <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>
-                        ← กลับ (Back)
+                        ปิด
                       </CeButton>
                     </div>
 
-                    {/* Smart PIN Freeform Auto-Parser */}
-                    <div
-                      style={{
-                        background: 'var(--b3)',
-                        border: '1px solid var(--cb)',
-                        borderRadius: '10px',
-                        padding: '14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '10px',
-                      }}
-                    >
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--c)' }}>
-                        ✨ พิมพ์หรือวางข้อมูลบัญชีแบบอิสระ ระบบจัดรูปแบบให้อัตโนมัติ (Smart Auto-Format):
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
+                        พิมพ์ข้อมูลดิบแบบอิสระ เช่น <code>ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000</code>
                       </div>
                       <textarea
+                        className="ce-input"
                         rows={2}
-                        placeholder="เช่น: ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000"
                         value={smartPinInput}
                         onChange={(e) => setSmartPinInput(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: 'var(--b1)',
-                          border: '1px solid var(--br)',
-                          color: 'var(--t1)',
-                          fontSize: '12px',
-                          resize: 'vertical',
-                        }}
+                        placeholder="ชื่อ-สกุล เลขบัญชี ธนาคาร วงเงิน..."
                       />
 
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        <button
-                          onClick={() => setSmartPinInput('ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000')}
+                      {smartPinPreview && (
+                        <div
                           style={{
-                            padding: '4px 9px',
-                            borderRadius: '6px',
-                            fontSize: '10px',
-                            cursor: 'pointer',
-                            background: 'var(--b2)',
-                            border: '1px solid var(--br)',
-                            color: 'var(--t2)',
+                            background: 'var(--b0)',
+                            border: '1px solid var(--sb)',
+                            borderRadius: '14px',
+                            padding: '14px',
+                            display: 'flex',
+                            gap: '14px',
+                            alignItems: 'flex-start',
                           }}
                         >
-                          ตัวอย่าง: กสิกร 50,000฿
-                        </button>
-                        <button
-                          onClick={() => setSmartPinInput('BBL 0970281670 บจก. ซีอี เอ็มไพร์ วงเงิน 500000')}
-                          style={{
-                            padding: '4px 9px',
-                            borderRadius: '6px',
-                            fontSize: '10px',
-                            cursor: 'pointer',
-                            background: 'var(--b2)',
-                            border: '1px solid var(--br)',
-                            color: 'var(--t2)',
-                          }}
-                        >
-                          ตัวอย่าง: กรุงเทพ 500,000฿
-                        </button>
-                      </div>
-
-                      {smartPinPreview ? (
-                        <div>
-                          <div style={{ fontSize: '10px', color: 'var(--s)', marginBottom: '4px', fontWeight: 700 }}>
-                            ✓ ตัวอย่างการ์ดที่บอทจัดรูปแบบอัตโนมัติ (Auto-Formatted Card Preview):
-                          </div>
+                          <BankLogo code={smartPinPreview.code} size={46} />
                           <pre
                             style={{
                               margin: 0,
-                              padding: '12px',
-                              borderRadius: '8px',
-                              background: 'var(--b0)',
-                              border: '1px solid var(--sb)',
                               color: 'var(--t1)',
                               fontFamily: "'Space Mono', monospace",
                               fontSize: '12px',
@@ -2237,213 +1744,129 @@ export default function App() {
                             {smartPinPreview.formattedMessage}
                           </pre>
                         </div>
-                      ) : (
-                        <div style={{ fontSize: '11px', color: 'var(--w)' }}>
-                          ⚠️ พิมพ์ชื่อธนาคาร (เช่น กสิกร, BBL, SCB, KTB) และเลขบัญชี 10 หลัก เพื่อให้ระบบจัดรูปแบบอัตโนมัติ
-                        </div>
                       )}
 
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <CeButton
-                          variant="primary"
-                          size="sm"
-                          disabled={!smartPinPreview}
-                          loading={loadingAction === 'smart-pin-tg'}
-                          onClick={() => handleSmartPinSubmit(true, true)}
-                          icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
-                        >
-                          📌 บันทึก & ปักหมุดเข้า Telegram อัตโนมัติ (Save & Auto-Pin)
-                        </CeButton>
-                        <CeButton
-                          variant="outline"
-                          size="sm"
-                          disabled={!smartPinPreview}
-                          loading={loadingAction === 'smart-pin'}
-                          onClick={() => handleSmartPinSubmit(false, false)}
-                        >
-                          💾 บันทึกเฉพาะในระบบ (Save Only)
-                        </CeButton>
-                      </div>
-                    </div>
-
-                    {/* Quick Dropdown Selector */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '6px', borderTop: '1px solid var(--br)' }}>
-                      <label style={{ fontSize: '11px', color: 'var(--t2)' }}>
-                        หรือเลือกจากบัญชีที่บันทึกไว้ (Or Select Saved Account):
-                      </label>
-                      <select
-                        value={pinCodeInput}
-                        onChange={(e) => setPinCodeInput(e.target.value)}
-                        style={{
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: 'var(--b1)',
-                          border: '1px solid var(--br)',
-                          color: 'var(--t1)',
-                        }}
-                      >
-                        {banks.map((b, idx) => (
-                          <option key={`${b.code}-${b.account}-${idx}`} value={b.code}>
-                            {b.code} · {b.account} ({b.holder})
-                          </option>
-                        ))}
-                      </select>
-
-                      <label style={{ fontSize: '11px', color: 'var(--t2)' }}>วงเงินรับสูงสุดรอบนี้ (Cycle Limit THB):</label>
-                      <input
-                        type="number"
-                        value={limitInput}
-                        onChange={(e) => setLimitInput(e.target.value)}
-                        style={{
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: 'var(--b1)',
-                          border: '1px solid var(--br)',
-                          color: 'var(--t1)',
-                          fontFamily: "'Space Mono', monospace",
-                        }}
-                      />
-
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <CeButton
-                          variant="success"
-                          size="sm"
-                          onClick={() => handleUpdatePin(true)}
-                          loading={loadingAction === 'pin-tg'}
-                          icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
-                        >
-                          📌 เลือก & ปักหมุดเข้า Telegram
-                        </CeButton>
-                        <CeButton
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleUpdatePin(false)}
-                          loading={loadingAction === 'pin'}
-                        >
-                          บันทึกในระบบ (Save)
-                        </CeButton>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* MODE 4: DESK RATE MANAGER */}
-                {panelMode === 'rate' && summary && (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--g)' }}>
-                        💱 ตั้งเรทขายโต๊ะ (Desk USDT/THB Rate)
-                      </div>
-                      <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>
-                        ← กลับ (Back)
-                      </CeButton>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <label style={{ fontSize: '11px', color: 'var(--t2)' }}>เรทขาย USDT ของโต๊ะ (Manual Desk Rate · /setrate):</label>
-                      <input
-                        type="number"
-                        step="0.05"
-                        value={rateInput}
-                        onChange={(e) => setRateInput(e.target.value)}
-                        style={{
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: 'var(--b1)',
-                          border: '1px solid var(--br)',
-                          color: 'var(--g)',
-                          fontFamily: "'Space Mono', monospace",
-                          fontSize: '16px',
-                          fontWeight: 700,
-                        }}
-                      />
                       <CeButton
-                        variant="gold"
-                        onClick={handleUpdateRate}
-                        loading={loadingAction === 'rate'}
-                        icon={<CeIcon name="rate" size={14} color="var(--b0)" />}
+                        variant="primary"
+                        size="lg"
+                        fullWidth
+                        disabled={!smartPinPreview}
+                        loading={loadingAction === 'smart-pin-tg'}
+                        onClick={() => handleSmartPinSubmit(true, true)}
+                        icon={<CeIcon name="pin" size={16} color="var(--b0)" />}
                       >
-                        อัปเดตเรทโต๊ะ (Update Desk Rate)
+                        📌 บันทึก & ปักหมุดเข้า Telegram อัตโนมัติ
                       </CeButton>
                       <CeButton
                         variant="ghost"
-                        onClick={handleAutoRate}
-                        loading={loadingAction === 'rate-auto'}
-                        icon={<CeIcon name="usdt" size={14} color="var(--c)" />}
+                        size="sm"
+                        fullWidth
+                        disabled={!smartPinPreview}
+                        loading={loadingAction === 'smart-pin'}
+                        onClick={() => handleSmartPinSubmit(false, false)}
                       >
-                        🤖 เรทอัตโนมัติตามตลาด (Auto Market: {market?.rate ? market.rate.toFixed(2) : '—'} + {autoCfg?.rateSpread ?? 0.3})
+                        บันทึกเฉพาะในเว็บนี้ (ไม่ส่ง Telegram)
                       </CeButton>
-                      <div
-                        style={{
-                          marginTop: '6px',
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: 'var(--b1)',
-                          border: '1px solid var(--br)',
-                          fontSize: '11px',
-                          color: 'var(--t2)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px',
-                        }}
-                      >
-                        <strong style={{ color: 'var(--t1)' }}>⚙️ สถานะการเชื่อมต่อ (System Integrations)</strong>
-                        <span>📈 ตลาดอ้างอิง (Market Source): {market?.source || '—'} · โหมด {market?.rateMode === 'auto' ? 'AUTO' : 'MANUAL'}</span>
-                        <span>💾 ฐานข้อมูล (Storage): {autoCfg?.integrations?.storage?.mode || 'local-json'}</span>
-                        <span>
-                          📨 Telegram Bot: {tgConnected ? '✅ พร้อมใช้งาน (Connected)' : '⏸ ยังไม่ได้ตั้งค่า (คลิกแท็บ Settings เพื่อเชื่อมต่อ)'}
-                        </span>
+                    </div>
+
+                    {/* Visual Bank Logo Quick Switcher */}
+                    <div style={{ borderTop: '1px solid var(--br)', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--t2)' }}>
+                        หรือเลือกจากบัญชีที่บันทึกไว้:
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {banks.slice(0, 6).map((b, i) => (
+                          <button
+                            key={`${b.code}-${b.account}-${i}`}
+                            onClick={() => {
+                              setPinCodeInput(b.code);
+                              setSmartPinInput(`${b.holder} ${b.account} ${resolveBankAsset(b.code).thai} วงเงิน ${limitInput}`);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '12px',
+                              padding: '10px 12px',
+                              borderRadius: '12px',
+                              background: pinCodeInput.toUpperCase() === b.code.toUpperCase() ? 'var(--ca)' : 'var(--b1)',
+                              border: pinCodeInput.toUpperCase() === b.code.toUpperCase() ? '1px solid var(--cb)' : '1px solid var(--br)',
+                              color: 'var(--t1)',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                            }}
+                          >
+                            <BankLogo code={b.code} size={34} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: '13px', fontWeight: 700 }}>{resolveBankAsset(b.code).thai} ({b.code})</div>
+                              <div style={{ fontSize: '11px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>
+                                {b.account} · {b.holder}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <CeButton variant="outline" size="sm" fullWidth onClick={() => handleUpdatePin(true)} loading={loadingAction === 'pin-tg'}>
+                          ปักหมุดบัญชีที่เลือกเข้า TG
+                        </CeButton>
                       </div>
                     </div>
                   </>
                 )}
 
-                {/* MODE 5: NEW CYCLE */}
+                {/* ── MODE 3: RATE MANAGER ── */}
+                {panelMode === 'rate' && summary && (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--t1)' }}>💱 ปรับเรทโต๊ะ (Desk Rate)</div>
+                      <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>ปิด</CeButton>
+                    </div>
+                    <div style={{ background: 'var(--b1)', borderRadius: '12px', padding: '14px', fontSize: '13px', display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--t2)' }}>เรทตลาด Binance TH ล่าสุด</span>
+                      <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
+                        {market?.rate ? `${market.rate.toFixed(2)} THB` : '—'}
+                      </strong>
+                    </div>
+                    <input
+                      className="ce-input"
+                      type="number"
+                      step="0.05"
+                      value={rateInput}
+                      onChange={(e) => setRateInput(e.target.value)}
+                      style={{ fontFamily: "'Space Mono', monospace", fontSize: '20px', fontWeight: 800, color: 'var(--g)' }}
+                    />
+                    <CeButton variant="gold" size="lg" fullWidth onClick={handleUpdateRate} loading={loadingAction === 'rate'}>
+                      บันทึกเรทโต๊ะ ({rateInput} THB)
+                    </CeButton>
+                    <CeButton variant="outline" fullWidth onClick={handleAutoRate} loading={loadingAction === 'rate-auto'}>
+                      🤖 ใช้เรทออโต้ตาม Binance TH (+{autoCfg?.rateSpread ?? 0.3})
+                    </CeButton>
+                  </>
+                )}
+
+                {/* ── MODE 4: NEW CYCLE ── */}
                 {panelMode === 'cycle' && summary && (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--g)' }}>
-                        🔄 ปิดรอบ {summary.cycle} → เปิดรอบใหม่ (New Cycle)
-                      </div>
-                      <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>
-                        ← กลับ (Back)
-                      </CeButton>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--t1)' }}>🔄 ปิดรอบ {summary.cycle}</div>
+                      <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>ปิด</CeButton>
                     </div>
-                    <div style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: 1.6 }}>
-                      การเปิดรอบใหม่จะบันทึกยอดสรุปของรอบ <strong>{summary.cycle}</strong> ลงประวัติ (Cycle History) และคงรายการที่ยังค้างโอน (READY / PENDING / SHORT) ไว้ในคิวโดยไม่ลบข้อมูล
+                    <div style={{ fontSize: '13px', color: 'var(--t2)', lineHeight: 1.6 }}>
+                      สรุปยอดรับ <strong>฿{fmtInt(summary.receivedThb)}</strong> · โอนแล้ว <strong>{fmtUsdt(summary.sentUsdt)} USDT</strong> · กำไร <strong>฿{fmtInt(summary.profitThb)}</strong> แล้วเปิดรอบใหม่ (รายการค้างโอนจะยังอยู่ครบ)
                     </div>
-                    <CeButton
-                      variant="gold"
-                      onClick={handleNewCycle}
-                      loading={loadingAction === 'cycle'}
-                      icon={<CeIcon name="cycle" size={14} color="var(--b0)" />}
-                    >
-                      ยืนยันเปิดรอบถัดไป (Confirm New Cycle)
+                    <CeButton variant="gold" size="lg" fullWidth onClick={handleNewCycle} loading={loadingAction === 'cycle'}>
+                      ยืนยันปิดรอบ & เปิดรอบใหม่
+                    </CeButton>
+                    <CeButton variant="ghost" size="sm" fullWidth onClick={handleResetDemo} loading={loadingAction === 'reset'}>
+                      รีเซ็ตข้อมูลตัวอย่าง (Reset Demo)
                     </CeButton>
                     {cycleHistory.length > 0 && (
-                      <div style={{ marginTop: '8px' }}>
-                        <div style={{ fontSize: '10px', color: 'var(--t3)', textTransform: 'uppercase', marginBottom: '6px' }}>
-                          ประวัติรอบที่ปิดแล้ว (Closed Cycle History)
-                        </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--t3)' }}>รอบที่ปิดแล้ว</div>
                         {cycleHistory.map((ch) => (
-                          <div
-                            key={ch.cycle}
-                            style={{
-                              padding: '8px 10px',
-                              borderRadius: '8px',
-                              background: 'var(--b3)',
-                              border: '1px solid var(--br)',
-                              fontSize: '11px',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              marginBottom: '4px',
-                            }}
-                          >
-                            <span>
-                              <strong>{ch.cycle}</strong> · {ch.closedAt}
-                            </span>
-                            <span style={{ fontFamily: "'Space Mono', monospace", color: 'var(--s)' }}>
-                              ฿{fmtInt(ch.receivedThb)} · {fmtUsdt(ch.sentUsdt)} USDT
-                            </span>
+                          <div key={ch.cycle} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 12px', borderRadius: '10px', background: 'var(--b1)', fontSize: '12px' }}>
+                            <strong>{ch.cycle} · {ch.closedAt}</strong>
+                            <span style={{ color: 'var(--s)', fontFamily: "'Space Mono', monospace" }}>฿{fmtInt(ch.receivedThb)}</span>
                           </div>
                         ))}
                       </div>
@@ -2456,225 +1879,143 @@ export default function App() {
         )}
 
         {/* ═══════════════════════════════════════════════════════ */}
-        {/* TAB 2: SCAN SLIP (OCR INTAKE SIMULATOR) */}
+        {/* TAB 2: รับสลิป (SCAN SLIP WITH VISUAL REAL BANK PICKER) */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeTab === 'scan' && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-              gap: '24px',
-              alignItems: 'start',
-            }}
-          >
+          <div className="ce-workspace-grid">
             <div
               style={{
                 background: 'var(--b2)',
                 border: '1px solid var(--br)',
-                borderRadius: '14px',
-                padding: '20px',
+                borderRadius: '18px',
+                padding: '22px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '16px',
+                gap: '18px',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--c)' }}>
-                    สแกนและรับสลิปเข้าคิว (Scan Slip & OCR Intake)
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--t3)' }}>
-                    ตรวจสอบความแม่นยำ OCR เทียบกับบัญชีหลักวันนี้ (Today PIN: {summary?.pinnedBank.code} · {summary?.pinnedBank.account})
-                  </div>
-                </div>
-                <CeIcon name="scan" size={24} color="var(--c)" />
-              </div>
-
-              {/* Quick Scenario Presets */}
               <div>
-                <div style={{ fontSize: '10px', color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
-                  สถานการณ์ทดสอบด่วน (1-Click Scenario Presets)
-                </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <CeButton
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setScanThb('10000');
-                      setScanBank(summary?.pinnedBank.code || 'BBL');
-                      setScanAccount(summary?.pinnedBank.account || '097-0-28xxx-x');
-                      setScanSender('นาย สมชาย ใจดี');
-                      setScanConfidence('98.7');
-                      setScanSlipDate(formatThaiSlipDateTime());
-                    }}
-                  >
-                    🟢 สลิปปกติ (Valid Match · 98.7%)
-                  </CeButton>
-                  <CeButton
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setScanThb('5000');
-                      setScanBank('KTB');
-                      setScanAccount('••••1670');
-                      setScanSender('ลูกค้าทดสอบ (Date Mismatch)');
-                      setScanConfidence('99.1');
-                      setScanSlipDate('13/12/2569 19:39');
-                    }}
-                  >
-                    🔴 วันที่สลิปไม่ตรง (13/12/2569)
-                  </CeButton>
-                  <CeButton
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setScanThb('15000');
-                      setScanBank('KTB');
-                      setScanAccount('xxx-x-x7413-x');
-                      setScanSender('นาย ประเสริฐ มั่งมี');
-                      setScanConfidence('96.4');
-                      setScanSlipDate(formatThaiSlipDateTime());
-                    }}
-                  >
-                    🟠 บัญชีไม่ตรง (Bank Mismatch · KTB)
-                  </CeButton>
-                  <CeButton
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setScanThb('8500');
-                      setScanBank(summary?.pinnedBank.code || 'BBL');
-                      setScanAccount(summary?.pinnedBank.account || '097-0-28xxx-x');
-                      setScanSender('นาย สม...ย ใจดี');
-                      setScanConfidence('72.0');
-                      setScanSlipDate(formatThaiSlipDateTime());
-                    }}
-                  >
-                    🟡 สลิปไม่ชัด (Low OCR · 72%)
-                  </CeButton>
+                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--t1)' }}>📷 รับสลิปใหม่ (Scan Slip)</div>
+                <div style={{ fontSize: '12px', color: 'var(--t3)' }}>
+                  ระบบตรวจสอบบัญชี PIN ({summary?.pinnedBank.code}) และวันที่สลิปอัตโนมัติ
                 </div>
               </div>
 
-              {/* Input fields */}
+              {/* 1-Click Quick Scenarios */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <CeButton
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setScanThb('10000');
+                    setScanBank(summary?.pinnedBank.code || 'KBANK');
+                    setScanAccount(summary?.pinnedBank.account || '1230004444');
+                    setScanSender('นาย สมชาย ใจดี');
+                    setScanConfidence('98.7');
+                    setScanSlipDate(formatThaiSlipDateTime());
+                  }}
+                >
+                  🟢 สลิปปกติ
+                </CeButton>
+                <CeButton
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setScanThb('5000');
+                    setScanBank('KTB');
+                    setScanAccount('••••1670');
+                    setScanSender('ลูกค้า (วันที่ไม่ตรง)');
+                    setScanConfidence('99.1');
+                    setScanSlipDate('13/12/2569 19:39');
+                  }}
+                >
+                  🔴 วันที่ไม่ตรง (13/12/2569)
+                </CeButton>
+                <CeButton
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setScanThb('15000');
+                    setScanBank('KTB');
+                    setScanAccount('xxx-x-x7413-x');
+                    setScanSender('นาย ประเสริฐ มั่งมี');
+                    setScanConfidence('96.4');
+                    setScanSlipDate(formatThaiSlipDateTime());
+                  }}
+                >
+                  🟠 บัญชีไม่ตรง
+                </CeButton>
+                <CeButton
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setScanThb('8500');
+                    setScanBank(summary?.pinnedBank.code || 'KBANK');
+                    setScanAccount(summary?.pinnedBank.account || '1230004444');
+                    setScanSender('นาย สม...ย ใจดี');
+                    setScanConfidence('72.0');
+                    setScanSlipDate(formatThaiSlipDateTime());
+                  }}
+                >
+                  🟡 สลิปไม่ชัด
+                </CeButton>
+              </div>
+
+              {/* Visual Real Thai Bank Logo Picker */}
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--t2)', marginBottom: '8px' }}>
+                  เลือกธนาคารในสลิป (Select Bank)
+                </div>
+                <div className="ce-bank-picker">
+                  {POPULAR_BANK_CODES.map((code) => {
+                    const asset = resolveBankAsset(code);
+                    const active = scanBank.toUpperCase() === code;
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        onClick={() => setScanBank(code)}
+                        className={`ce-bank-tile ${active ? 'is-active' : ''}`}
+                      >
+                        <BankLogo code={code} size={34} />
+                        <span style={{ fontSize: '10px', fontWeight: 700 }}>{asset.short}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                    ยอดโอนตามสลิป (Amount THB)
-                  </label>
+                  <label style={{ fontSize: '12px', color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>ยอดโอน (THB)</label>
                   <input
+                    className="ce-input"
                     type="number"
                     value={scanThb}
                     onChange={(e) => setScanThb(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--g)',
-                      fontFamily: "'Space Mono', monospace",
-                      fontWeight: 700,
-                    }}
+                    style={{ fontFamily: "'Space Mono', monospace", fontSize: '16px', fontWeight: 700, color: 'var(--g)' }}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                    ธนาคารผู้รับในสลิป (Recipient Bank)
-                  </label>
-                  <select
-                    value={scanBank}
-                    onChange={(e) => setScanBank(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--t1)',
-                    }}
-                  >
-                    {banks.map((b, idx) => (
-                      <option key={`${b.code}-${idx}`} value={b.code}>
-                        {b.code} · {b.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                    เลขบัญชีในสลิป (Slip Account No.)
-                  </label>
+                  <label style={{ fontSize: '12px', color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>เลขบัญชีในสลิป</label>
                   <input
+                    className="ce-input"
                     value={scanAccount}
                     onChange={(e) => setScanAccount(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--t1)',
-                      fontFamily: "'Space Mono', monospace",
-                    }}
+                    style={{ fontFamily: "'Space Mono', monospace" }}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                    ความแม่นยำ OCR (Confidence %)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={scanConfidence}
-                    onChange={(e) => setScanConfidence(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--c)',
-                      fontFamily: "'Space Mono', monospace",
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                    ชื่อผู้โอนในสลิป (Sender Name)
-                  </label>
-                  <input
-                    value={scanSender}
-                    onChange={(e) => setScanSender(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--t1)',
-                    }}
-                  />
+                  <label style={{ fontSize: '12px', color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>ชื่อผู้โอน</label>
+                  <input className="ce-input" value={scanSender} onChange={(e) => setScanSender(e.target.value)} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                    🗓 วันที่/เวลาสลิป (Slip Date & Time · พ.ศ.)
-                  </label>
+                  <label style={{ fontSize: '12px', color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>วันที่/เวลาสลิป (พ.ศ.)</label>
                   <input
+                    className="ce-input"
                     value={scanSlipDate}
                     onChange={(e) => setScanSlipDate(e.target.value)}
-                    placeholder="เช่น 13/12/2569 19:39"
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--t1)',
-                      fontFamily: "'Space Mono', monospace",
-                    }}
+                    style={{ fontFamily: "'Space Mono', monospace" }}
                   />
                 </div>
               </div>
@@ -2682,488 +2023,191 @@ export default function App() {
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <CeButton
                   variant="success"
+                  size="lg"
                   onClick={() => handleScanSubmit(false)}
                   loading={loadingAction === 'scan'}
-                  icon={<CeIcon name="scan" size={14} color="var(--b0)" />}
+                  icon={<CeIcon name="scan" size={16} color="var(--b0)" />}
                 >
-                  🔎 ประมวลผลสลิป (Run OCR Intake)
+                  ตรวจสอบและรับสลิปเข้าคิว
                 </CeButton>
-                <CeButton
-                  variant="ghost"
-                  onClick={() => handleScanSubmit(true)}
-                  loading={loadingAction === 'scan'}
-                  icon={<CeIcon name="duplicate" size={14} color="var(--c)" />}
-                >
-                  จำลองสลิปซ้ำ (Simulate Duplicate)
+                <CeButton variant="ghost" onClick={() => handleScanSubmit(true)} loading={loadingAction === 'scan'}>
+                  ทดสอบสลิปซ้ำ
                 </CeButton>
               </div>
             </div>
 
-            {/* Right: Live OCR Result & Bot Reply */}
+            {/* Right Live CE Card Output */}
             <div
               style={{
                 background: 'var(--b2)',
                 border: '1px solid var(--br)',
-                borderRadius: '14px',
-                padding: '20px',
+                borderRadius: '18px',
+                padding: '22px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '14px',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--c)' }}>
-                  ผลลัพธ์การ์ดบอท (Telegram Bot Card Output)
-                </span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <CeButton
-                    variant="outline"
-                    size="sm"
-                    loading={loadingAction === 'tg-send:scan-card'}
-                    onClick={() => handleSendTelegramLive(currentScanCard, 'scan-card')}
-                  >
-                    📨 ส่งเข้า Telegram (Send Live)
-                  </CeButton>
-                  <CeButton
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setActiveTab('desk')}
-                  >
-                    ไปที่คิวงาน (Open Desk) →
-                  </CeButton>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <BankLogo code={scanBank} size={34} />
+                  <span style={{ fontSize: '14px', fontWeight: 800 }}>ตัวอย่างการ์ดบอท (◈ CE ·)</span>
                 </div>
+                <CeButton
+                  variant="primary"
+                  size="sm"
+                  loading={loadingAction === 'tg-send:scan-card'}
+                  onClick={() => handleSendTelegramLive(currentScanCard, 'scan-card')}
+                >
+                  📨 ส่งเข้า Telegram
+                </CeButton>
               </div>
               <pre
                 style={{
                   margin: 0,
                   padding: '16px',
-                  borderRadius: '10px',
+                  borderRadius: '14px',
                   background: 'var(--b0)',
-                  border: '1px solid var(--cb)',
+                  border: '1px solid var(--br)',
                   color: 'var(--t1)',
                   fontFamily: "'Space Mono', monospace",
-                  fontSize: '12px',
-                  lineHeight: 1.6,
+                  fontSize: '12.5px',
+                  lineHeight: 1.65,
                   whiteSpace: 'pre-wrap',
-                  minHeight: '240px',
                 }}
               >
                 {currentScanCard}
               </pre>
+              <CeButton variant="ghost" size="sm" onClick={() => setActiveTab('desk')}>
+                ← กลับไปหน้าหลัก (Desk)
+              </CeButton>
             </div>
           </div>
         )}
 
         {/* ═══════════════════════════════════════════════════════ */}
-        {/* TAB 3: BOT MESSAGE TEMPLATES */}
-        {/* ═══════════════════════════════════════════════════════ */}
-        {activeTab === 'messages' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-              <div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--c)' }}>
-                  คลังข้อความแจ้งเตือนมาตรฐานสากล (Bilingual Bot Message Templates)
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--t3)' }}>
-                  รองรับ 2 ภาษา ไทย-อังกฤษ (TH/EN) — กดคัดลอก (Copy) หรือยิงทดสอบเข้า Telegram จริง (Send Live) ได้ทันที
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {['ALL', 'Intake · OCR', 'Verify · Checks', 'Transaction', 'Mismatch', 'Cycle', 'Alerts'].map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => setMsgGroup(g)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '9999px',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: msgGroup === g ? '1px solid var(--cb)' : '1px solid var(--br)',
-                      background: msgGroup === g ? 'var(--ca)' : 'var(--b2)',
-                      color: msgGroup === g ? 'var(--c)' : 'var(--t2)',
-                    }}
-                  >
-                    {g === 'ALL' ? 'ทั้งหมด (ALL)' : g}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))',
-                gap: '14px',
-              }}
-            >
-              {messageTemplatesList
-                .filter((m) => (msgGroup === 'ALL' ? true : m.group === msgGroup))
-                .map((m) => (
-                  <div
-                    key={m.key}
-                    style={{
-                      background: 'var(--b2)',
-                      border: '1px solid var(--br)',
-                      borderRadius: '12px',
-                      padding: '14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                      <div>
-                        <span style={{ fontSize: '10px', color: 'var(--c)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
-                          {m.key} · {m.group}
-                        </span>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--t1)', marginTop: '2px' }}>{m.title}</div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <CeButton
-                          variant="ghost"
-                          size="sm"
-                          loading={loadingAction === `tg-send:${m.key}`}
-                          onClick={() => handleSendTelegramLive(m.text, m.key)}
-                        >
-                          📨 ส่ง (TG)
-                        </CeButton>
-                        <CeButton
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyText(m.text, `คัดลอก ${m.key} แล้ว (Copied)`)}
-                        >
-                          📋 Copy
-                        </CeButton>
-                      </div>
-                    </div>
-                    <pre
-                      style={{
-                        margin: 0,
-                        padding: '10px',
-                        borderRadius: '8px',
-                        background: 'var(--b0)',
-                        border: '1px solid var(--br)',
-                        color: 'var(--t1)',
-                        fontFamily: "'Space Mono', monospace",
-                        fontSize: '11px',
-                        lineHeight: 1.5,
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {m.text}
-                    </pre>
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════════════════ */}
-        {/* TAB: CE EMPIRE BOT FLEET (14 SPECIALIZED BOTS) */}
+        {/* TAB 3: บอททั้งหมด (14 BOTS — CLEAN & SCANNABLE) */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeTab === 'bots' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Fleet Header Banner */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
             <div
               style={{
                 background: 'var(--b2)',
-                border: '1px solid var(--cb)',
-                borderRadius: '14px',
-                padding: '18px 22px',
+                border: '1px solid var(--br)',
+                borderRadius: '18px',
+                padding: '20px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: '16px',
+                gap: '14px',
                 flexWrap: 'wrap',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                <div
-                  style={{
-                    width: '44px',
-                    height: '44px',
-                    borderRadius: '12px',
-                    background: 'var(--ca)',
-                    border: '1px solid var(--cb)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <CeIcon name="bot" size={24} color="var(--c)" />
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: 800 }}>
+                  🤖 บอททั้งหมดของระบบ ({fleetSummary?.active || 14}/{fleetSummary?.total || 14} ออนไลน์)
                 </div>
-                <div>
-                  <div style={{ fontSize: '17px', fontWeight: 800, color: 'var(--t1)' }}>
-                    ศูนย์ควบคุมบอทครบระบบ CE Empire (All {fleetSummary?.total || 14} Operational Bots)
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
-                    เชื่อมเรทตลาดสด Binance TH ({market?.rate ? `${market.rate.toFixed(2)} THB` : '—'}) · บอททุกตัวยิงรายงานเข้า Telegram จริงได้ทันที หรือผูก Token แยกทีละบอทได้
-                  </div>
+                <div style={{ fontSize: '12px', color: 'var(--t2)', marginTop: '2px' }}>
+                  ทุกบอทเชื่อมเรท Binance TH ({market?.rate?.toFixed(2) || '—'} THB) และส่งแจ้งเตือนเข้ากลุ่ม Telegram ได้ทันที
                 </div>
               </div>
-
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <CeButton
-                  variant="primary"
-                  size="sm"
-                  loading={loadingAction === 'broadcast-fleet'}
-                  onClick={handleBroadcastFleet}
-                  icon={<CeIcon name="send" size={14} color="var(--b0)" />}
-                >
-                  📡 ส่งสถานะบอททั้ง {fleetSummary?.total || 14} ตัวเข้า Telegram (Broadcast)
-                </CeButton>
-                <CeButton
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setActiveTab('settings')}
-                  icon={<CeIcon name="settings" size={14} color="var(--c)" />}
-                >
-                  ⚙️ ตั้งค่า Token หลัก (Main Bot)
-                </CeButton>
-              </div>
-            </div>
-
-            {/* Fleet KPI Strip */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: '12px',
-              }}
-            >
-              <KpiCard
-                label="บอททั้งหมด (Total Bots)"
-                value={String(fleetSummary?.total ?? bots.length)}
-                unit="BOTS"
-                note="CE Empire Full Fleet"
-                color="cyan"
-                icon={<CeIcon name="bot" size={14} color="#00d4ff" />}
-              />
-              <KpiCard
-                label="กำลังทำงาน (Active)"
-                value={String(fleetSummary?.active ?? 0)}
-                unit="ONLINE"
-                note="พร้อมรับงานและส่งแจ้งเตือน"
-                color="green"
-                icon={<CeIcon name="settled" size={14} color="#00e676" />}
-              />
-              <KpiCard
-                label="พัก / บำรุงรักษา (Paused)"
-                value={String((fleetSummary?.paused ?? 0) + (fleetSummary?.maintenance ?? 0))}
-                unit="IDLE"
-                note={`Error: ${fleetSummary?.error ?? 0}`}
-                color="yellow"
-                icon={<CeIcon name="pending" size={14} color="#ffca28" />}
-              />
-              <KpiCard
-                label="เรทตลาดสด (Binance TH)"
-                value={market?.rate ? market.rate.toFixed(2) : '—'}
-                unit="THB"
-                note={
-                  market?.bid && market?.ask
-                    ? `Bid ${market.bid.toFixed(2)} · Ask ${market.ask.toFixed(2)}`
-                    : 'USDTTHB Live Spot'
-                }
-                color="gold"
-                icon={<CeIcon name="rate" size={14} color="#f0b429" />}
-              />
-              <KpiCard
-                label="งานที่ประมวลผลแล้ว (Processed)"
-                value={fmtInt(fleetSummary?.totalSuccess ?? 0)}
-                unit="JOBS"
-                note={`คิวรอ (Queue): ${fleetSummary?.totalQueue ?? 0}`}
-                color="cyan"
-                icon={<CeIcon name="profit" size={14} color="#00d4ff" />}
-              />
-            </div>
-
-            {/* Category Filters */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {['ALL', 'Core Ops', 'Monitoring & Reports', 'AI & Visual', 'QA & Security'].map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setBotCatFilter(cat)}
-                    style={{
-                      padding: '6px 13px',
-                      borderRadius: '9999px',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: botCatFilter === cat ? '1px solid var(--cb)' : '1px solid var(--br)',
-                      background: botCatFilter === cat ? 'var(--ca)' : 'var(--b2)',
-                      color: botCatFilter === cat ? 'var(--c)' : 'var(--t2)',
-                    }}
-                  >
-                    {cat === 'ALL' ? `ทั้งหมด (ALL · ${bots.length})` : cat}
-                  </button>
-                ))}
-              </div>
-              <CeButton variant="ghost" size="sm" onClick={fetchBots}>
-                🔄 รีเฟรชสถานะบอท (Refresh)
+              <CeButton
+                variant="primary"
+                size="sm"
+                loading={loadingAction === 'broadcast-fleet'}
+                onClick={handleBroadcastFleet}
+                icon={<CeIcon name="send" size={14} color="var(--b0)" />}
+              >
+                📡 ส่งสถานะทุกบอทเข้า Telegram
               </CeButton>
             </div>
 
-            {/* Bot Cards Grid */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-                gap: '14px',
-              }}
-            >
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {['ALL', 'Core Ops', 'Monitoring & Reports', 'AI & Visual', 'QA & Security'].map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setBotCatFilter(cat)}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '9999px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: botCatFilter === cat ? '1px solid var(--cb)' : '1px solid var(--br)',
+                    background: botCatFilter === cat ? 'var(--ca)' : 'var(--b2)',
+                    color: botCatFilter === cat ? 'var(--c)' : 'var(--t2)',
+                  }}
+                >
+                  {cat === 'ALL' ? `ทั้งหมด (${bots.length})` : cat}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
               {bots
                 .filter((b) => (botCatFilter === 'ALL' ? true : b.category === botCatFilter))
                 .map((bot) => {
-                  const statusColor =
-                    bot.status === 'active'
-                      ? 'var(--s)'
-                      : bot.status === 'paused'
-                      ? 'var(--w)'
-                      : bot.status === 'error'
-                      ? 'var(--d)'
-                      : 'var(--c)';
-                  const statusBg =
-                    bot.status === 'active'
-                      ? 'var(--sa)'
-                      : bot.status === 'paused'
-                      ? 'var(--wa)'
-                      : bot.status === 'error'
-                      ? 'var(--da)'
-                      : 'var(--ca)';
+                  const active = bot.status === 'active';
                   const isEditing = editingBotSlug === bot.slug;
-
                   return (
                     <div
                       key={bot.slug}
                       style={{
                         background: 'var(--b2)',
-                        border: `1px solid ${bot.slug === 'operator-vault' ? 'var(--cb)' : 'var(--br)'}`,
-                        borderRadius: '14px',
+                        border: '1px solid var(--br)',
+                        borderRadius: '16px',
                         padding: '16px',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '12px',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                         <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--t1)' }}>{bot.name}</span>
-                            <span style={{ fontSize: '10px', color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
-                              {bot.handle}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: '10px', color: 'var(--t3)', marginTop: '2px' }}>
-                            {bot.category} · Owner: {bot.owner}
+                          <div style={{ fontSize: '15px', fontWeight: 800 }}>{bot.name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
+                            {bot.handle} · {bot.category}
                           </div>
                         </div>
                         <span
                           style={{
-                            padding: '3px 9px',
+                            padding: '4px 10px',
                             borderRadius: '9999px',
-                            fontSize: '9px',
+                            fontSize: '10px',
                             fontWeight: 800,
-                            letterSpacing: '0.8px',
-                            textTransform: 'uppercase',
-                            color: statusColor,
-                            background: statusBg,
-                            border: `1px solid ${statusColor}`,
+                            color: active ? 'var(--s)' : 'var(--w)',
+                            background: active ? 'var(--sa)' : 'var(--wa)',
                           }}
                         >
-                          ● {bot.status}
+                          ● {active ? 'ONLINE' : bot.status.toUpperCase()}
                         </span>
                       </div>
 
-                      <div style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: 1.45 }}>
-                        <div>{bot.roleTh}</div>
-                        <div style={{ fontSize: '10px', color: 'var(--t3)', marginTop: '2px' }}>({bot.roleEn})</div>
-                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: 1.5 }}>{bot.roleTh}</div>
 
-                      {/* Operating Modes */}
-                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                        {bot.modes.map((m) => (
-                          <span
-                            key={m}
-                            style={{
-                              padding: '2px 7px',
-                              borderRadius: '6px',
-                              background: 'var(--b3)',
-                              border: '1px solid var(--br)',
-                              fontSize: '9px',
-                              fontFamily: "'Space Mono', monospace",
-                              color: 'var(--t2)',
-                            }}
-                          >
-                            {m}
-                          </span>
-                        ))}
-                      </div>
-
-                      {/* Telemetry */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          background: 'var(--b1)',
-                          border: '1px solid var(--br)',
-                          borderRadius: '8px',
-                          padding: '8px 10px',
-                          fontSize: '10px',
-                          fontFamily: "'Space Mono', monospace",
-                        }}
-                      >
-                        <span style={{ color: 'var(--t3)' }}>
-                          OK: <strong style={{ color: 'var(--s)' }}>{fmtInt(bot.successCount)}</strong>
-                        </span>
-                        <span style={{ color: 'var(--t3)' }}>
-                          QUEUE: <strong style={{ color: 'var(--c)' }}>{bot.queueDepth}</strong>
-                        </span>
-                        <span style={{ color: 'var(--t3)' }}>
-                          TG:{' '}
-                          <strong style={{ color: bot.telegramRoute?.ready ? 'var(--s)' : 'var(--w)' }}>
-                            {bot.telegramRoute?.usesCustomToken ? 'Dedicated' : bot.telegramRoute?.ready ? 'Linked ✓' : 'Unset'}
-                          </strong>
-                        </span>
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        {bot.status === 'active' ? (
-                          <CeButton
-                            variant="ghost"
-                            size="sm"
-                            loading={loadingAction === `bot:${bot.slug}:pause`}
-                            onClick={() => handleBotAction(bot.slug, 'pause')}
-                          >
-                            ⏸ พัก (Pause)
-                          </CeButton>
-                        ) : (
-                          <CeButton
-                            variant="success"
-                            size="sm"
-                            loading={loadingAction === `bot:${bot.slug}:start`}
-                            onClick={() => handleBotAction(bot.slug, 'start')}
-                          >
-                            ▶ เปิด (Start)
-                          </CeButton>
-                        )}
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <CeButton
+                          variant={active ? 'ghost' : 'success'}
+                          size="sm"
+                          loading={loadingAction === `bot:${bot.slug}:${active ? 'pause' : 'start'}`}
+                          onClick={() => handleBotAction(bot.slug, active ? 'pause' : 'start')}
+                        >
+                          {active ? '⏸ พัก' : '▶ เปิด'}
+                        </CeButton>
                         <CeButton
                           variant="outline"
                           size="sm"
                           loading={loadingAction === `bot:${bot.slug}:dispatch`}
                           onClick={() => handleBotAction(bot.slug, 'dispatch')}
                         >
-                          📨 ส่ง TG (Test)
+                          📨 ส่งเข้า TG
                         </CeButton>
                         <CeButton
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            if (isEditing) {
-                              setEditingBotSlug(null);
-                            } else {
+                            if (isEditing) setEditingBotSlug(null);
+                            else {
                               setEditingBotSlug(bot.slug);
                               setBotCustomToken('');
                               setBotCustomChatId(bot.telegramRoute?.chatId || '');
@@ -3171,93 +2215,29 @@ export default function App() {
                             }
                           }}
                         >
-                          ⚙️ {isEditing ? 'ปิด (Close)' : 'ตั้งค่า (Config)'}
+                          ⚙️ {isEditing ? 'ปิด' : 'ตั้งค่า'}
                         </CeButton>
                       </div>
 
-                      {/* Per-Bot Optional Dedicated Token & Chat ID Drawer */}
                       {isEditing && (
-                        <div
-                          style={{
-                            marginTop: '4px',
-                            padding: '12px',
-                            borderRadius: '10px',
-                            background: 'var(--b1)',
-                            border: '1px solid var(--cb)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '8px',
-                          }}
-                        >
-                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--c)' }}>
-                            ⚙️ ตั้งค่าเฉพาะบอท (Optional Dedicated Bot Token / Chat ID)
-                          </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '10px', borderTop: '1px solid var(--br)' }}>
+                          <input className="ce-input" value={botHandleInput} onChange={(e) => setBotHandleInput(e.target.value)} placeholder="@bot_handle" />
                           <input
-                            placeholder="ชื่อ Handle เช่น @my_bot"
-                            value={botHandleInput}
-                            onChange={(e) => setBotHandleInput(e.target.value)}
-                            style={{
-                              padding: '7px 10px',
-                              borderRadius: '6px',
-                              background: 'var(--b2)',
-                              border: '1px solid var(--br)',
-                              color: 'var(--t1)',
-                              fontSize: '11px',
-                              fontFamily: "'Space Mono', monospace",
-                            }}
-                          />
-                          <input
+                            className="ce-input"
                             type="password"
-                            placeholder={
-                              bot.telegramRoute?.usesCustomToken
-                                ? `Token เฉพาะ: ${bot.telegramRoute.maskedToken}`
-                                : 'เว้นว่าง = ใช้บอทหลัก @Razen_7xbot อัตโนมัติ'
-                            }
                             value={botCustomToken}
                             onChange={(e) => setBotCustomToken(e.target.value)}
-                            style={{
-                              padding: '7px 10px',
-                              borderRadius: '6px',
-                              background: 'var(--b2)',
-                              border: '1px solid var(--br)',
-                              color: 'var(--t1)',
-                              fontSize: '11px',
-                              fontFamily: "'Space Mono', monospace",
-                            }}
+                            placeholder="Token เฉพาะบอท (เว้นว่าง = ใช้บอทหลัก)"
                           />
                           <input
-                            placeholder="Chat ID เฉพาะบอทนี้ (เว้นว่าง = ใช้กลุ่มหลัก)"
+                            className="ce-input"
                             value={botCustomChatId}
                             onChange={(e) => setBotCustomChatId(e.target.value)}
-                            style={{
-                              padding: '7px 10px',
-                              borderRadius: '6px',
-                              background: 'var(--b2)',
-                              border: '1px solid var(--br)',
-                              color: 'var(--g)',
-                              fontSize: '11px',
-                              fontFamily: "'Space Mono', monospace",
-                            }}
+                            placeholder="Chat ID เฉพาะบอท (เว้นว่าง = ใช้กลุ่มหลัก)"
                           />
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            <CeButton
-                              variant="success"
-                              size="sm"
-                              loading={loadingAction === `bot-cfg:${bot.slug}`}
-                              onClick={() => handleSaveBotConfig(bot.slug, false)}
-                            >
-                              💾 บันทึก (Save)
-                            </CeButton>
-                            {bot.telegramRoute?.usesCustomToken && (
-                              <CeButton
-                                variant="danger"
-                                size="sm"
-                                onClick={() => handleSaveBotConfig(bot.slug, true)}
-                              >
-                                ใช้บอทหลัก (Reset)
-                              </CeButton>
-                            )}
-                          </div>
+                          <CeButton variant="success" size="sm" loading={loadingAction === `bot-cfg:${bot.slug}`} onClick={() => handleSaveBotConfig(bot.slug, false)}>
+                            บันทึกการตั้งค่าบอท
+                          </CeButton>
                         </div>
                       )}
                     </div>
@@ -3268,638 +2248,365 @@ export default function App() {
         )}
 
         {/* ═══════════════════════════════════════════════════════ */}
-        {/* TAB 4: SETTINGS (API & TELEGRAM BOT CONTROL CENTER) */}
+        {/* TAB 4: ตั้งค่า (API & TELEGRAM + MESSAGES + BANK LOGOS) */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeTab === 'settings' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Top Banner */}
-            <div
-              style={{
-                background: 'var(--b2)',
-                border: '1px solid var(--cb)',
-                borderRadius: '14px',
-                padding: '18px 22px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '16px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                <div
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            {/* Sub-tabs */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {(
+                [
+                  { id: 'api', label: '⚙️ API & Telegram Bot' },
+                  { id: 'messages', label: '💬 คลังข้อความบอท (Templates)' },
+                  { id: 'banks', label: '🏦 โลโก้ธนาคารทั้งหมด (21 Banks)' },
+                ] as { id: SettingsSubTab; label: string }[]
+              ).map((st) => (
+                <button
+                  key={st.id}
+                  onClick={() => setSettingsSubTab(st.id)}
                   style={{
-                    width: '44px',
-                    height: '44px',
-                    borderRadius: '12px',
-                    background: 'var(--ca)',
-                    border: '1px solid var(--cb)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    padding: '8px 16px',
+                    borderRadius: '10px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: settingsSubTab === st.id ? '1px solid var(--cb)' : '1px solid var(--br)',
+                    background: settingsSubTab === st.id ? 'var(--ca)' : 'var(--b2)',
+                    color: settingsSubTab === st.id ? 'var(--c)' : 'var(--t2)',
                   }}
                 >
-                  <CeIcon name="bot" size={24} color="var(--c)" />
-                </div>
-                <div>
-                  <div style={{ fontSize: '17px', fontWeight: 800, color: 'var(--t1)' }}>
-                    ตั้งค่าระบบเชื่อมต่อ API & บอทแจ้งเตือน (API & Telegram Bot Settings)
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
-                    เชื่อมต่อ Telegram Bot จริงผ่าน BotFather Token พร้อมระบบค้นหา Chat ID อัตโนมัติและทดสอบยิงข้อความสด (Live Telegram API)
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <CeButton
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleSendTelegramLive(undefined, 'live-test')}
-                  loading={loadingAction === 'tg-send:live-test'}
-                  icon={<CeIcon name="send" size={14} color="var(--b0)" />}
-                >
-                  🚀 ทดสอบส่งเข้า Telegram จริง (Send Live Test)
-                </CeButton>
-              </div>
+                  {st.label}
+                </button>
+              ))}
             </div>
 
-            {tgStatusBanner && (
-              <div
-                style={{
-                  padding: '12px 16px',
-                  borderRadius: '10px',
-                  background: tgStatusBanner.ok ? 'var(--sa)' : 'var(--ala)',
-                  border: `1px solid ${tgStatusBanner.ok ? 'var(--sb)' : 'var(--alb)'}`,
-                  color: tgStatusBanner.ok ? 'var(--s)' : 'var(--al)',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                }}
-              >
-                {tgStatusBanner.ok ? '✅ ' : '⚠️ '}
-                {tgStatusBanner.text}
-              </div>
-            )}
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-                gap: '20px',
-                alignItems: 'start',
-              }}
-            >
-              {/* CARD 1: TELEGRAM BOT CONFIGURATION */}
-              <div
-                style={{
-                  background: 'var(--b2)',
-                  border: '1px solid var(--br)',
-                  borderRadius: '14px',
-                  padding: '20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <CeIcon name="bot" size={18} color="var(--c)" />
-                    <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--c)' }}>
-                      1 · ตั้งค่าบอทเทเลแกรม (Telegram Bot Setup)
-                    </span>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      padding: '3px 10px',
-                      borderRadius: '9999px',
-                      background: tgConnected ? 'var(--sa)' : 'var(--wa)',
-                      border: `1px solid ${tgConnected ? 'var(--sb)' : 'var(--wb)'}`,
-                      color: tgConnected ? 'var(--s)' : 'var(--w)',
-                    }}
-                  >
-                    {tgConnected ? '🟢 เชื่อมต่อพร้อมส่ง (ACTIVE)' : '🟡 รอตั้งค่า (UNCONFIGURED)'}
-                  </span>
-                </div>
-
-                {/* Verified Bot Identity Card */}
-                {botInfo && (
+            {settingsSubTab === 'api' && (
+              <>
+                {tgStatusBanner && (
                   <div
                     style={{
-                      padding: '10px 14px',
-                      borderRadius: '10px',
-                      background: 'var(--sa)',
-                      border: '1px solid var(--sb)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '12px',
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      background: tgStatusBanner.ok ? 'var(--sa)' : 'var(--ala)',
+                      border: `1px solid ${tgStatusBanner.ok ? 'var(--sb)' : 'var(--alb)'}`,
+                      color: tgStatusBanner.ok ? 'var(--s)' : 'var(--al)',
+                      fontSize: '13px',
+                      fontWeight: 700,
                     }}
                   >
-                    <div>
-                      <div style={{ fontWeight: 800, color: 'var(--s)' }}>
-                        🤖 {botInfo.firstName} (@{botInfo.username})
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'var(--t2)', fontFamily: "'Space Mono', monospace" }}>
-                        Bot ID: {botInfo.id} · Group Access: {botInfo.canJoinGroups ? 'Enabled' : 'Disabled'}
-                      </div>
-                      {botInfo.webhookUrl && (
-                        <div style={{ fontSize: '10px', color: 'var(--c)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
-                          🔗 Active Webhook: {botInfo.webhookUrl} (Pending: {botInfo.pendingUpdates ?? 0})
-                        </div>
-                      )}
-                    </div>
-                    <CeIcon name="check" size={18} color="var(--s)" />
+                    {tgStatusBanner.ok ? '✅ ' : '⚠️ '}
+                    {tgStatusBanner.text}
                   </div>
                 )}
 
-                {/* Bot Token */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--t2)' }}>
-                      🔑 รหัสโทเคนบอท (Telegram Bot Token · @BotFather)
-                    </label>
-                    {hasSavedToken && (
-                      <span style={{ fontSize: '10px', color: 'var(--s)', fontFamily: "'Space Mono', monospace" }}>
-                        บันทึกไว้แล้ว (Saved): {maskedToken}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type={showBotToken ? 'text' : 'password'}
-                      placeholder={hasSavedToken ? `ใช้ค่าเดิมที่บันทึกไว้ (${maskedToken}) หรือวาง Token ใหม่เพื่อเปลี่ยน` : 'เช่น 1234567890:AAHxyz... (จาก @BotFather)'}
-                      value={botTokenInput}
-                      onChange={(e) => setBotTokenInput(e.target.value)}
-                      style={{
-                        flex: 1,
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: 'var(--b1)',
-                        border: '1px solid var(--br)',
-                        color: 'var(--t1)',
-                        fontFamily: "'Space Mono', monospace",
-                        fontSize: '12px',
-                      }}
-                    />
-                    <CeButton variant="ghost" size="sm" onClick={() => setShowBotToken((v) => !v)}>
-                      {showBotToken ? 'ซ่อน (Hide)' : 'แสดง (Show)'}
-                    </CeButton>
-                    <CeButton
-                      variant="outline"
-                      size="sm"
-                      onClick={handleVerifyBot}
-                      loading={loadingAction === 'tg-verify'}
-                    >
-                      🔍 ตรวจบอท (Verify)
-                    </CeButton>
-                  </div>
-                </div>
-
-                {/* Target Chat ID */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--t2)' }}>
-                      💬 รหัสห้องแชท / กลุ่มเป้าหมาย (Target Chat ID · OPS_CHAT_ID)
-                    </label>
-                    <button
-                      onClick={handleDetectChats}
-                      disabled={loadingAction === 'tg-detect'}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--c)',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {loadingAction === 'tg-detect' ? '⏳ กำลังค้นหา...' : '📡 ดึงแชทอัตโนมัติ (Auto-Detect Chats)'}
-                    </button>
-                  </div>
-                  <input
-                    placeholder="เช่น -1001234567890 (กลุ่ม) หรือ 123456789 (แชทส่วนตัว)"
-                    value={chatIdInput}
-                    onChange={(e) => setChatIdInput(e.target.value)}
+                <div className="ce-workspace-grid">
+                  {/* Telegram Bot Setup */}
+                  <div
                     style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
+                      background: 'var(--b2)',
                       border: '1px solid var(--br)',
-                      color: 'var(--g)',
-                      fontFamily: "'Space Mono', monospace",
-                      fontSize: '12px',
-                      fontWeight: 700,
+                      borderRadius: '18px',
+                      padding: '22px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '14px',
                     }}
-                  />
-
-                  {/* Auto-detected chat pills */}
-                  {detectedChats.length > 0 && (
-                    <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <span style={{ fontSize: '10px', color: 'var(--t3)' }}>
-                        คลิกเลือกห้องแชทที่ตรวจพบจากบอท (Click to Select Detected Chat):
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 800 }}>🤖 ตั้งค่าบอท Telegram หลัก</div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: tgConnected ? 'var(--s)' : 'var(--w)' }}>
+                        {tgConnected ? '🟢 พร้อมส่ง' : '🟡 รอตั้งค่า'}
                       </span>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        {detectedChats.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={() => setChatIdInput(c.id)}
-                            style={{
-                              padding: '6px 10px',
-                              borderRadius: '8px',
-                              fontSize: '11px',
-                              cursor: 'pointer',
-                              border: chatIdInput === c.id ? '1px solid var(--cb)' : '1px solid var(--br)',
-                              background: chatIdInput === c.id ? 'var(--ca)' : 'var(--b3)',
-                              color: chatIdInput === c.id ? 'var(--c)' : 'var(--t1)',
-                              fontFamily: "'Space Mono', monospace",
-                            }}
-                          >
-                            {c.type === 'private' ? '👤' : '👥'} {c.title} ({c.id})
-                          </button>
-                        ))}
+                    </div>
+
+                    {botInfo && (
+                      <div style={{ padding: '12px', borderRadius: '12px', background: 'var(--sa)', border: '1px solid var(--sb)', fontSize: '12px' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--s)' }}>
+                          {botInfo.firstName} (@{botInfo.username})
+                        </div>
+                        {botInfo.webhookUrl && (
+                          <div style={{ fontSize: '11px', color: 'var(--t2)', marginTop: '3px', fontFamily: "'Space Mono', monospace" }}>
+                            Webhook: {botInfo.webhookUrl}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>
+                        Bot Token (จาก @BotFather) {hasSavedToken && <span style={{ color: 'var(--s)' }}>· บันทึกแล้ว ({maskedToken})</span>}
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          className="ce-input"
+                          type={showBotToken ? 'text' : 'password'}
+                          placeholder={hasSavedToken ? `ใช้ค่าเดิม (${maskedToken}) หรือวางใหม่` : '1234567890:AAH...'}
+                          value={botTokenInput}
+                          onChange={(e) => setBotTokenInput(e.target.value)}
+                          style={{ fontFamily: "'Space Mono', monospace" }}
+                        />
+                        <CeButton variant="ghost" size="sm" onClick={() => setShowBotToken((v) => !v)}>
+                          {showBotToken ? 'ซ่อน' : 'ดู'}
+                        </CeButton>
+                        <CeButton variant="outline" size="sm" onClick={handleVerifyBot} loading={loadingAction === 'tg-verify'}>
+                          ตรวจบอท
+                        </CeButton>
                       </div>
                     </div>
-                  )}
-                </div>
 
-                {/* Event Notification Toggles */}
-                <div
-                  style={{
-                    background: 'var(--b3)',
-                    border: '1px solid var(--br)',
-                    borderRadius: '10px',
-                    padding: '12px 14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--t1)' }}>
-                    🔔 เลือกเหตุการณ์แจ้งเตือนอัตโนมัติ (Auto-Notification Triggers)
-                  </div>
-                  {(
-                    [
-                      { key: 'onScan', label: 'แจ้งเตือนเมื่อสแกนรับสลิปใหม่ (New Slip Intake)' },
-                      { key: 'onSettle', label: 'แจ้งเตือนเมื่อโอน USDT / ชดเชยยอดขาด (USDT Settlement & Short Recovery)' },
-                      { key: 'onMismatch', label: 'แจ้งเตือนเมื่อสลิปบัญชีไม่ตรง / กด Override (Mismatch & Override Alert)' },
-                      { key: 'onNewCycle', label: 'แจ้งเตือนสรุปยอดเมื่อปิด/เปิดรอบใหม่ (Cycle Rollover Summary)' },
-                    ] as { key: keyof NotifyEvents; label: string }[]
-                  ).map((ev) => (
-                    <label
-                      key={ev.key}
-                      style={{ display: 'flex', alignItems: 'center', gap: '9px', fontSize: '12px', color: 'var(--t2)', cursor: 'pointer' }}
-                    >
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                        <label style={{ fontSize: '12px', color: 'var(--t2)' }}>Chat ID กลุ่มหรือแชทเป้าหมาย</label>
+                        <button onClick={handleDetectChats} style={{ background: 'none', border: 'none', color: 'var(--c)', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                          📡 ดึงแชทอัตโนมัติ
+                        </button>
+                      </div>
                       <input
-                        type="checkbox"
-                        checked={notifyEvents[ev.key]}
-                        onChange={(e) => setNotifyEvents((prev) => ({ ...prev, [ev.key]: e.target.checked }))}
-                        style={{ accentColor: '#3fe0ff', width: '15px', height: '15px' }}
+                        className="ce-input"
+                        placeholder="-5532107732"
+                        value={chatIdInput}
+                        onChange={(e) => setChatIdInput(e.target.value)}
+                        style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: 'var(--g)' }}
                       />
-                      <span>{ev.label}</span>
-                    </label>
-                  ))}
-                </div>
-
-                {/* Custom Live Test Message */}
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>
-                    ✉️ ข้อความทดสอบกำหนดเอง (Optional Custom Test Message):
-                  </label>
-                  <textarea
-                    rows={3}
-                    placeholder="เว้นว่างไว้เพื่อส่งการ์ดสรุปสถานะโต๊ะอัตโนมัติ (Leave blank to send standard CE Vault Live Test Card)"
-                    value={customTestMsg}
-                    onChange={(e) => setCustomTestMsg(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      background: 'var(--b1)',
-                      border: '1px solid var(--br)',
-                      color: 'var(--t1)',
-                      fontSize: '12px',
-                      resize: 'vertical',
-                    }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <CeButton
-                    variant="success"
-                    onClick={() => handleSaveSettings(false)}
-                    loading={loadingAction === 'save-settings'}
-                    icon={<CeIcon name="check" size={14} color="var(--b0)" />}
-                  >
-                    💾 บันทึกการตั้งค่าบอท (Save Bot Settings)
-                  </CeButton>
-                  <CeButton
-                    variant="primary"
-                    onClick={() => handleSendTelegramLive(undefined, 'live-test')}
-                    loading={loadingAction === 'tg-send:live-test'}
-                    icon={<CeIcon name="send" size={14} color="var(--b0)" />}
-                  >
-                    🚀 ยิงข้อความทดสอบจริง (Send Test Now)
-                  </CeButton>
-                  {hasSavedToken && (
-                    <CeButton
-                      variant="danger"
-                      size="sm"
-                      onClick={() => handleSaveSettings(true)}
-                      icon={<CeIcon name="trash" size={13} color="#fff" />}
-                    >
-                      ล้าง Token (Clear)
-                    </CeButton>
-                  )}
-                </div>
-              </div>
-
-              {/* CARD 2: API ENDPOINT & MARKET FEED SETTINGS */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                <div
-                  style={{
-                    background: 'var(--b2)',
-                    border: '1px solid var(--br)',
-                    borderRadius: '14px',
-                    padding: '20px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <CeIcon name="link" size={18} color="var(--g)" />
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--g)' }}>
-                        2 · ตั้งค่า API และเรทตลาด (API & Market Feed)
-                      </span>
+                      {detectedChats.length > 0 && (
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
+                          {detectedChats.map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => setChatIdInput(c.id)}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '8px',
+                                background: 'var(--b1)',
+                                border: '1px solid var(--cb)',
+                                color: 'var(--c)',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {c.title} ({c.id})
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <span
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        padding: '3px 10px',
-                        borderRadius: '9999px',
-                        background: 'var(--ca)',
-                        border: '1px solid var(--cb)',
-                        color: 'var(--c)',
-                        fontFamily: "'Space Mono', monospace",
-                      }}
-                    >
-                      {engineMode === 'browser-standalone' ? '🌐 Browser Engine' : '🖥️ Node API Server'}
-                    </span>
-                  </div>
 
-                  {/* API Health Summary Box */}
-                  <div
-                    style={{
-                      background: 'var(--b3)',
-                      border: '1px solid var(--br)',
-                      borderRadius: '10px',
-                      padding: '12px 14px',
-                      fontSize: '12px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--t3)' }}>สถานะเซิร์ฟเวอร์ (API Health):</span>
-                      <strong style={{ color: apiHealthy ? 'var(--s)' : 'var(--d)', fontFamily: "'Space Mono', monospace" }}>
-                        {apiHealthy ? `200 OK (${apiLatencyMs ?? '—'} ms)` : 'OFFLINE'}
-                      </strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--t3)' }}>แหล่งเรทตลาดสด (Live Market Feed):</span>
-                      <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
-                        {market?.rate ? `${market.rate.toFixed(2)} THB (${market.source})` : 'กำลังโหลด...'}
-                      </strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--t3)' }}>ที่เก็บข้อมูล (State Storage):</span>
-                      <strong style={{ fontFamily: "'Space Mono', monospace" }}>
-                        {autoCfg?.integrations?.storage?.mode || (engineMode === 'browser-standalone' ? 'browser-localStorage' : 'local-json')}
-                      </strong>
-                    </div>
-                  </div>
-
-                  {/* Custom Backend URL */}
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>
-                      🌐 เซิร์ฟเวอร์ API ภายนอก (Custom Backend API URL · Optional):
-                    </label>
-                    <input
-                      placeholder="เว้นว่างเพื่อใช้เซิร์ฟเวอร์ในตัว หรือใส่ https://your-api.example.com"
-                      value={customApiUrlInput}
-                      onChange={(e) => setCustomApiUrlInput(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: 'var(--b1)',
-                        border: '1px solid var(--br)',
-                        color: 'var(--t1)',
-                        fontFamily: "'Space Mono', monospace",
-                        fontSize: '12px',
-                      }}
+                    <textarea
+                      className="ce-input"
+                      rows={2}
+                      placeholder="ข้อความทดสอบกำหนดเอง (เว้นว่างเพื่อส่งการ์ดมาตรฐาน)"
+                      value={customTestMsg}
+                      onChange={(e) => setCustomTestMsg(e.target.value)}
                     />
+
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <CeButton variant="success" onClick={() => handleSaveSettings(false)} loading={loadingAction === 'save-settings'}>
+                        💾 บันทึกการตั้งค่า
+                      </CeButton>
+                      <CeButton variant="primary" onClick={() => handleSendTelegramLive(undefined, 'live-test')} loading={loadingAction === 'tg-send:live-test'}>
+                        🚀 ทดสอบยิงเข้า Telegram จริง
+                      </CeButton>
+                      {hasSavedToken && (
+                        <CeButton variant="danger" size="sm" onClick={() => handleSaveSettings(true)}>
+                          ล้าง Token
+                        </CeButton>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Auto Rate Spread */}
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--t2)', display: 'block', marginBottom: '5px' }}>
-                      💱 ส่วนต่างบวกเพิ่มอัตโนมัติจากราคาตลาด (Auto Rate Spread · THB):
-                    </label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      value={spreadInput}
-                      onChange={(e) => setSpreadInput(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: 'var(--b1)',
-                        border: '1px solid var(--br)',
-                        color: 'var(--g)',
-                        fontFamily: "'Space Mono', monospace",
-                        fontSize: '13px',
-                        fontWeight: 700,
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <CeButton
-                      variant="gold"
-                      size="sm"
-                      onClick={() => handleSaveSettings(false)}
-                      loading={loadingAction === 'save-settings'}
-                    >
-                      💾 บันทึกค่า API & Spread (Save API Config)
-                    </CeButton>
-                    <CeButton
-                      variant="outline"
-                      size="sm"
-                      onClick={handlePingApi}
-                      loading={loadingAction === 'ping-api'}
-                    >
-                      🩺 ทดสอบ API (/api/healthz)
-                    </CeButton>
-                    <CeButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleRefreshMarketNow}
-                      loading={loadingAction === 'refresh-mkt'}
-                    >
-                      🔄 ดึงเรทตลาดสด (Refresh Rate)
-                    </CeButton>
-                  </div>
-                </div>
-
-                {/* CARD 3: TELEGRAM DELIVERY AUDIT LOG */}
-                <div
-                  style={{
-                    background: 'var(--b2)',
-                    border: '1px solid var(--br)',
-                    borderRadius: '14px',
-                    padding: '20px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--c)' }}>
-                      3 · ประวัติการยิงแจ้งเตือน Telegram ล่าสุด (Live Delivery Log)
-                    </span>
-                    <CeButton variant="ghost" size="sm" onClick={fetchSettings}>
-                      🔄 รีเฟรช (Refresh)
-                    </CeButton>
-                  </div>
-
-                  {deliveryLog.length === 0 ? (
+                  {/* API + Market + Delivery Log */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     <div
                       style={{
-                        padding: '24px',
-                        borderRadius: '10px',
-                        background: 'var(--b1)',
-                        border: '1px dashed var(--br)',
-                        textAlign: 'center',
-                        fontSize: '12px',
-                        color: 'var(--t3)',
+                        background: 'var(--b2)',
+                        border: '1px solid var(--br)',
+                        borderRadius: '18px',
+                        padding: '22px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
                       }}
                     >
-                      ยังไม่มีประวัติการส่งข้อความ — ใส่ Bot Token + Chat ID แล้วกดปุ่ม "🚀 ยิงข้อความทดสอบจริง (Send Test Now)" เพื่อทดสอบได้ทันที
+                      <div style={{ fontSize: '16px', fontWeight: 800 }}>🌐 API & เรทตลาด Binance TH</div>
+                      <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
+                        โหมดทำงาน: <strong>{engineMode === 'browser-standalone' ? 'เว็บสาธารณะ (Browser Engine)' : 'Backend API Server'}</strong> · สถานะ:{' '}
+                        <strong style={{ color: apiHealthy ? 'var(--s)' : 'var(--d)' }}>
+                          {apiHealthy ? `200 OK (${apiLatencyMs ?? '—'}ms)` : 'OFFLINE'}
+                        </strong>
+                      </div>
+                      <input
+                        className="ce-input"
+                        placeholder="URL Backend ภายนอก (เว้นว่าง = ใช้อัตโนมัติ)"
+                        value={customApiUrlInput}
+                        onChange={(e) => setCustomApiUrlInput(e.target.value)}
+                        style={{ fontFamily: "'Space Mono', monospace" }}
+                      />
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <label style={{ fontSize: '12px', color: 'var(--t2)', whiteSpace: 'nowrap' }}>บวกเพิ่มจาก Binance TH:</label>
+                        <input
+                          className="ce-input"
+                          type="number"
+                          step="0.05"
+                          value={spreadInput}
+                          onChange={(e) => setSpreadInput(e.target.value)}
+                          style={{ maxWidth: '120px', fontFamily: "'Space Mono', monospace", fontWeight: 700, color: 'var(--g)' }}
+                        />
+                        <span style={{ fontSize: '12px', color: 'var(--t3)' }}>THB</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <CeButton variant="gold" size="sm" onClick={() => handleSaveSettings(false)} loading={loadingAction === 'save-settings'}>
+                          บันทึกค่า API
+                        </CeButton>
+                        <CeButton variant="outline" size="sm" onClick={handlePingApi} loading={loadingAction === 'ping-api'}>
+                          🩺 ทดสอบ API
+                        </CeButton>
+                        <CeButton variant="ghost" size="sm" onClick={handleRefreshMarketNow} loading={loadingAction === 'refresh-mkt'}>
+                          🔄 รีเฟรช Binance TH
+                        </CeButton>
+                      </div>
                     </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
-                      {deliveryLog.map((item) => (
-                        <div
-                          key={item.id}
-                          style={{
-                            padding: '10px 12px',
-                            borderRadius: '8px',
-                            background: 'var(--b1)',
-                            border: `1px solid ${item.ok ? 'var(--sb)' : 'var(--alb)'}`,
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            gap: '10px',
-                            fontSize: '11px',
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 700, color: item.ok ? 'var(--s)' : 'var(--al)' }}>
-                              {item.ok ? '✅ ส่งสำเร็จ (Delivered)' : '❌ ส่งไม่สำเร็จ (Failed)'} · {item.event}
+
+                    <div
+                      style={{
+                        background: 'var(--b2)',
+                        border: '1px solid var(--br)',
+                        borderRadius: '18px',
+                        padding: '20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                      }}
+                    >
+                      <div style={{ fontSize: '14px', fontWeight: 800 }}>📨 ประวัติการส่งเข้า Telegram ล่าสุด</div>
+                      {deliveryLog.length === 0 ? (
+                        <div style={{ fontSize: '12px', color: 'var(--t3)' }}>ยังไม่มีประวัติการส่ง</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
+                          {deliveryLog.map((item) => (
+                            <div
+                              key={item.id}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                padding: '9px 12px',
+                                borderRadius: '10px',
+                                background: 'var(--b1)',
+                                fontSize: '11px',
+                              }}
+                            >
+                              <div>
+                                <strong style={{ color: item.ok ? 'var(--s)' : 'var(--al)' }}>
+                                  {item.ok ? '✅ สำเร็จ' : '❌ ล้มเหลว'} · {item.event}
+                                </strong>
+                                <div style={{ color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>{item.detail}</div>
+                              </div>
+                              <div style={{ textAlign: 'right', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>
+                                {item.latencyMs}ms
+                              </div>
                             </div>
-                            <div style={{ color: 'var(--t3)', fontFamily: "'Space Mono', monospace", fontSize: '10px' }}>
-                              Chat: {item.chatId} · {item.detail}
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right', fontFamily: "'Space Mono', monospace", fontSize: '10px', color: 'var(--t2)' }}>
-                            <div>{new Date(item.timestamp).toLocaleTimeString('th-TH')}</div>
-                            <div>{item.latencyMs} ms</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {settingsSubTab === 'messages' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {['ALL', 'PIN & Verify', 'Settlement', 'Cycle & Alerts'].map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => setMsgGroup(g)}
+                      style={{
+                        padding: '6px 13px',
+                        borderRadius: '9999px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: msgGroup === g ? '1px solid var(--cb)' : '1px solid var(--br)',
+                        background: msgGroup === g ? 'var(--ca)' : 'var(--b2)',
+                        color: msgGroup === g ? 'var(--c)' : 'var(--t2)',
+                      }}
+                    >
+                      {g === 'ALL' ? 'ทั้งหมด' : g}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
+                  {messageTemplatesList
+                    .filter((m) => (msgGroup === 'ALL' ? true : m.group === msgGroup))
+                    .map((m) => (
+                      <div key={m.key} style={{ background: 'var(--b2)', border: '1px solid var(--br)', borderRadius: '14px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                          <strong style={{ fontSize: '13px' }}>{m.title}</strong>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <CeButton variant="outline" size="sm" onClick={() => handleSendTelegramLive(m.text, m.key)}>📨 TG</CeButton>
+                            <CeButton variant="ghost" size="sm" onClick={() => copyText(m.text)}>Copy</CeButton>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <pre style={{ margin: 0, padding: '12px', borderRadius: '10px', background: 'var(--b0)', fontSize: '11.5px', fontFamily: "'Space Mono', monospace", whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
+                          {m.text}
+                        </pre>
+                      </div>
+                    ))}
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* ═══════════════════════════════════════════════════════ */}
-        {/* TAB 5: DESIGN SYSTEM v1.0 */}
-        {/* ═══════════════════════════════════════════════════════ */}
-        {activeTab === 'design' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            {/* Status Badges */}
-            <div
-              style={{
-                background: 'var(--b2)',
-                border: '1px solid var(--br)',
-                borderRadius: '14px',
-                padding: '20px',
-              }}
-            >
-              <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--c)', marginBottom: '14px', letterSpacing: '0.6px' }}>
-                ป้ายสถานะธุรกรรม 10 สถานะ (10 Transaction Status Badges)
-              </div>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                {ALL_STATUSES.map((st) => (
-                  <StatusBadge key={st} status={st} />
-                ))}
-              </div>
-            </div>
-
-            {/* SVG Icons */}
-            <div
-              style={{
-                background: 'var(--b2)',
-                border: '1px solid var(--br)',
-                borderRadius: '14px',
-                padding: '20px',
-              }}
-            >
-              <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--c)', marginBottom: '14px', letterSpacing: '0.6px' }}>
-                ชุดไอคอนมาตรฐาน ({ALL_ICONS.length} Vector Icons · CeIcon)
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-                  gap: '10px',
-                }}
-              >
-                {ALL_ICONS.map((name) => (
-                  <div
-                    key={name}
-                    onClick={() => copyText(`<CeIcon name="${name}" size={20} />`, `คัดลอกไอคอน (Copied Icon): ${name}`)}
-                    style={{
-                      cursor: 'pointer',
-                      background: 'var(--b3)',
-                      border: '1px solid var(--br)',
-                      borderRadius: '10px',
-                      padding: '12px 8px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: '8px',
-                    }}
-                  >
-                    <CeIcon name={name} size={22} color="var(--c)" />
-                    <span style={{ fontSize: '10px', color: 'var(--t2)', fontFamily: "'Space Mono', monospace" }}>
-                      {name}
-                    </span>
+            {settingsSubTab === 'banks' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div style={{ background: 'var(--b2)', border: '1px solid var(--br)', borderRadius: '18px', padding: '20px' }}>
+                  <div style={{ fontSize: '15px', fontWeight: 800, marginBottom: '14px' }}>
+                    🏦 โลโก้ธนาคารไทยและวอลเล็ทจริง ({ALL_BANK_CODES.length} สถาบันการเงิน)
                   </div>
-                ))}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(125px, 1fr))', gap: '12px' }}>
+                    {ALL_BANK_CODES.map((code) => {
+                      const asset = resolveBankAsset(code);
+                      return (
+                        <div
+                          key={code}
+                          style={{
+                            background: 'var(--b1)',
+                            border: '1px solid var(--br)',
+                            borderRadius: '14px',
+                            padding: '14px 10px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '8px',
+                            textAlign: 'center',
+                          }}
+                        >
+                          <BankLogo code={code} size={46} />
+                          <div style={{ fontSize: '12px', fontWeight: 700 }}>{asset.thai}</div>
+                          <div style={{ fontSize: '10px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>{asset.code}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--b2)', border: '1px solid var(--br)', borderRadius: '18px', padding: '20px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 800, marginBottom: '12px' }}>สถานะธุรกรรม & ไอคอนระบบ ({ALL_ICONS.length} Icons)</div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                    {ALL_STATUSES.map((st) => (
+                      <StatusBadge key={st} status={st} />
+                    ))}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
+                    {ALL_ICONS.map((name) => (
+                      <div key={name} style={{ background: 'var(--b1)', borderRadius: '10px', padding: '10px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                        <CeIcon name={name} size={20} color="var(--c)" />
+                        <span style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>{name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </main>

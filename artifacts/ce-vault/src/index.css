@@ -109,8 +109,8 @@ body {
   margin: 0;
   color: var(--t1);
   background: var(--b0);
-  font-family: "Space Grotesk", var(--font-body), sans-serif;
-  line-height: 1.5;
+  font-family: "Noto Sans Thai", "Space Grotesk", var(--font-body), sans-serif;
+  line-height: 1.55;
   text-rendering: optimizeLegibility;
 }
 
@@ -340,3 +340,77 @@ textarea {
   height: 1px;
   background: hsl(var(--border));
 }
+
+/* ── Simplified Clean Fintech UI Helpers ── */
+.ce-tx-row:hover {
+  background: var(--b3) !important;
+  border-color: rgba(63, 224, 255, 0.35) !important;
+}
+
+.ce-hero-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1.25fr;
+  gap: 16px;
+}
+
+.ce-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.05fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.ce-bank-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+
+.ce-bank-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 12px;
+  background: var(--b1);
+  border: 1px solid var(--br);
+  color: var(--t2);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+}
+
+.ce-bank-tile:hover {
+  background: var(--b3);
+  border-color: rgba(63, 224, 255, 0.35);
+}
+
+.ce-bank-tile.is-active {
+  background: rgba(63, 224, 255, 0.12);
+  border-color: #3fe0ff;
+  color: var(--t1);
+}
+
+.ce-input {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: var(--b1);
+  border: 1px solid var(--br);
+  color: var(--t1);
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.ce-input:focus {
+  outline: none;
+  border-color: #3fe0ff;
+}
+
+@media (max-width: 960px) {
+  .ce-hero-grid,
+  .ce-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

@@ -1,9 +1,9 @@
 // src/components/ui/TxItem.tsx
-// CE VAULT — Transaction List Item
+// CE VAULT — Clean Transaction List Item with Real Official Thai Bank Logo
 
 import React from 'react'
 import { StatusBadge, TxStatus } from './StatusBadge'
-import { CeIcon, IconName }      from './CeIcon'
+import { BankLogo } from './BankLogo'
 
 interface TxItemProps {
   id:       string
@@ -13,68 +13,71 @@ interface TxItemProps {
   sender?:  string
   time:     string
   status:   TxStatus
+  selected?: boolean
   onClick?: () => void
 }
 
-const STATUS_META: Record<TxStatus, { color: string; bg: string; icon: IconName }> = {
-  READY:     { color: '#ffca28', bg: 'rgba(255,202,40,.08)',  icon: 'ready'    },
-  PENDING:   { color: '#00d4ff', bg: 'rgba(0,212,255,.07)',   icon: 'pending'  },
-  SETTLED:   { color: '#00e676', bg: 'rgba(0,230,118,.07)',   icon: 'settled'  },
-  SHORT:     { color: '#ff5252', bg: 'rgba(255,82,82,.07)',   icon: 'short'    },
-  REJECTED:  { color: '#8899aa', bg: 'rgba(80,80,100,.08)',   icon: 'rejected' },
-  REVERSED:  { color: '#cc8888', bg: 'rgba(130,70,70,.1)',    icon: 'reversed' },
-  OCR:       { color: '#b39ddb', bg: 'rgba(179,157,219,.08)', icon: 'ocr'      },
-  REVIEW:    { color: '#90a8e8', bg: 'rgba(70,100,200,.1)',   icon: 'review'   },
-  MISMATCH:  { color: '#ff6d35', bg: 'rgba(255,109,53,.08)',  icon: 'mismatch' },
-  DUPLICATE: { color: '#9977ee', bg: 'rgba(90,70,180,.1)',    icon: 'duplicate'},
+const STATUS_ACCENT: Record<TxStatus, string> = {
+  READY:     '#ffca28',
+  PENDING:   '#3fe0ff',
+  SETTLED:   '#44d895',
+  SHORT:     '#ff5252',
+  REJECTED:  '#8899aa',
+  REVERSED:  '#cc8888',
+  OCR:       '#b39ddb',
+  REVIEW:    '#90a8e8',
+  MISMATCH:  '#ff6d35',
+  DUPLICATE: '#9977ee',
 }
 
-export function TxItem({ id, thb, usdt, bank, sender, time, status, onClick }: TxItemProps) {
-  const meta = STATUS_META[status]
+export function TxItem({ id, thb, usdt, bank, sender, time, status, selected, onClick }: TxItemProps) {
+  const accent = STATUS_ACCENT[status]
   return (
     <div
       onClick={onClick}
+      className={`ce-tx-row ${selected ? 'is-selected' : ''}`}
       style={{
-        background:   'var(--b2)',
-        border:       '1px solid var(--br)',
-        borderRadius: 'var(--r10)',
-        padding:      '11px 14px',
+        background:   selected ? 'rgba(63, 224, 255, 0.08)' : 'var(--b2)',
+        border:       selected ? '1px solid rgba(63, 224, 255, 0.45)' : '1px solid var(--br)',
+        borderRadius: '14px',
+        padding:      '13px 15px',
         display:      'flex',
         alignItems:   'center',
-        gap:          '11px',
+        gap:          '13px',
         cursor:       onClick ? 'pointer' : undefined,
-        transition:   'all 0.15s',
+        transition:   'background 0.15s, border-color 0.15s, transform 0.12s',
       }}
-      onMouseEnter={e => { if(onClick) { (e.currentTarget as HTMLDivElement).style.background = 'var(--b3)'; (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--bra)' } }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--b2)'; (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--br)' }}
     >
-      {/* Icon */}
-      <div style={{
-        width: '36px', height: '36px',
-        borderRadius: 'var(--r6)',
-        background: meta.bg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
-      }}>
-        <CeIcon name={meta.icon} size={18} color={meta.color} />
-      </div>
+      {/* Real Official Thai Bank Logo */}
+      <BankLogo code={bank} size={40} />
 
-      {/* Info */}
+      {/* Main Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: '10px', color: 'var(--t3)', fontWeight: 600, fontFamily: "'Space Mono', monospace", letterSpacing: '0.3px' }}>
-          {id}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--t1)', fontFamily: "'Space Mono', monospace" }}>
+            ฿{thb}
+          </span>
+          <span style={{ fontSize: '11px', color: 'var(--t3)', fontFamily: "'Space Mono', monospace" }}>
+            {id}
+          </span>
         </div>
-        <div style={{ fontSize: '14px', fontWeight: 700, marginTop: '1px', color: meta.color, fontFamily: "'Space Mono', monospace" }}>
-          ฿{thb}
-        </div>
-        <div style={{ fontSize: '10px', color: 'var(--t3)', marginTop: '1px' }}>
-          {time} · {bank}{sender ? ` · ${sender}` : ''}
+        <div
+          style={{
+            fontSize: '12px',
+            color: 'var(--t2)',
+            marginTop: '3px',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {sender || bank} · {time} น.
         </div>
       </div>
 
-      {/* Right */}
+      {/* Right USDT & Status */}
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontSize: '13px', fontWeight: 700, fontFamily: "'Space Mono', monospace", color: meta.color }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, fontFamily: "'Space Mono', monospace", color: accent }}>
           {usdt} USDT
         </div>
         <div style={{ marginTop: '5px' }}>
