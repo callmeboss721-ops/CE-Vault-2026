@@ -10,6 +10,7 @@
     "build": "pnpm --filter @workspace/ce-vault run build",
     "test:unit": "node scripts/unit-tests.mjs",
     "verify:jwks": "node scripts/check-jwks.js",
-    "start": "pnpm --filter @workspace/ce-vault run build && CE_SERVE_STATIC=1 PORT=${PORT:-23379} node artifacts/api-server/src/server.mjs"
+    "start": "pnpm --filter @workspace/ce-vault run build && CE_SERVE_STATIC=1 PORT=${PORT:-23379} node artifacts/api-server/src/server.mjs",
+    "start:prod": "CE_SERVE_STATIC=1 PORT=${PORT:-23379} node artifacts/api-server/src/server.mjs"
   }
 }

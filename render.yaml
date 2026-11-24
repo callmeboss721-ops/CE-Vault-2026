@@ -1,0 +1,21 @@
+# Render Blueprint — 1-click deployment for CE-Vault (Single-Port Web + API + Telegram Bot)
+services:
+  - type: web
+    name: ce-vault-operator-desk
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: pnpm run start:prod
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CE_SERVE_STATIC
+        value: "1"
+      - key: CE_RATE_SPREAD
+        value: "0.3"
+      - key: BOT_TOKEN
+        sync: false
+      - key: OPS_CHAT_ID
+        sync: false
