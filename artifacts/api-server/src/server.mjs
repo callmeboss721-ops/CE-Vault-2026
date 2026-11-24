@@ -387,7 +387,8 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       const thb = Number(body.thb || 10000);
       const bank = String(body.bank || state.pinnedBank.code);
-      const account = String(body.account || (bank === state.pinnedBank.code ? state.pinnedBank.account : 'xxx-x-x7413-x'));
+      const bankMatchesPin = bank.toUpperCase() === String(state.pinnedBank.code).toUpperCase();
+      const account = String(body.account || (bankMatchesPin ? state.pinnedBank.account : 'xxx-x-x7413-x'));
       const sender = String(body.sender || 'นาย สมชาย ใจดี');
       const confidence = Number(body.confidence ?? 98.7);
       const forceDuplicate = Boolean(body.forceDuplicate);
@@ -421,7 +422,7 @@ const server = http.createServer(async (req, res) => {
       } else if (confidence < 80) {
         status = 'REVIEW';
         notes = `OCR ความแม่นยำต่ำ (${confidence}%) — ต้องตรวจสอบก่อนยืนยัน`;
-      } else if (bank !== state.pinnedBank.code) {
+      } else if (!bankMatchesPin) {
         status = 'MISMATCH';
         notes = `บัญชีในสลิป ${bank} (${account}) ≠ บัญชี PIN วันนี้ ${state.pinnedBank.code} (${state.pinnedBank.account})`;
       } else if (summary.usedThb + thb > state.limitThb) {
@@ -482,7 +483,7 @@ const server = http.createServer(async (req, res) => {
         tx.overrideReason = reason;
         tx.notes = `⚡ OVERRIDE: ${reason}`;
       } else if (action === 'recheck') {
-        if (tx.bank === state.pinnedBank.code) {
+        if (String(tx.bank).toUpperCase() === String(state.pinnedBank.code).toUpperCase()) {
           tx.status = 'READY';
           tx.notes = 'RECHECK ✓ บัญชีตรงกับ PIN ปัจจุบันแล้ว';
         } else {

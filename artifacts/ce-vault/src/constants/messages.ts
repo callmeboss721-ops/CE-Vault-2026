@@ -30,6 +30,7 @@ export interface MsgData {
   count_short?:    number
   count_ready?:    number
   count_exception?:number
+  profit?:         string
 }
 
 export const MSG = {
@@ -143,6 +144,17 @@ USDT ใหม่   ${d.usdt}`,
 🕐 ${d.time}
 🟦 PENDING`,
 
+  TX_QUEUED: (d: MsgData): string =>
+`◈ CE · QUEUED ⏳
+━━━━━━━━━━━━━━
+⏳ เข้าคิวรอส่ง USDT แล้ว
+
+🆔 ${d.id}
+📥 ${d.thb} THB
+💎 EXPECTED ${d.usdt} USDT
+💱 RATE ${d.rate}
+🟦 PENDING`,
+
   TX_SETTLED: (d: MsgData): string =>
 `◈ CE · DONE ✓
 ━━━━━━━━━━━━━━
@@ -183,6 +195,28 @@ TOTAL    ${d.usdt_expected} USDT ✓
 🟢 SETTLED
 🆔 ${d.id}`,
 
+  TX_SHORT_RESOLVED: (d: MsgData): string =>
+`◈ CE · DONE ✓
+━━━━━━━━━━━━━━
+✅ ส่งเพิ่มครบจำนวนแล้ว (SHORT → SETTLED)
+
+EXPECTED   ${d.usdt_expected} USDT
+SENT TOTAL ${d.usdt_sent} USDT ✓
+
+🟢 SETTLED
+🆔 ${d.id}`,
+
+  TX_OVERRUN: (d: MsgData): string =>
+`◈ CE · OVERRUN ⛔
+━━━━━━━━━━━━━━
+⛔ ยอดส่งเกิน Expected!
+
+🆔 ${d.id}
+EXPECTED   ${d.usdt_expected} USDT
+SENT TOTAL ${d.usdt_sent} USDT ← เกิน!
+
+ไม่สามารถบันทึกได้`,
+
   TX_REJECTED: (d: MsgData): string =>
 `◈ CE · REJECTED
 ━━━━━━━━━━━━━━
@@ -193,6 +227,19 @@ TOTAL    ${d.usdt_expected} USDT ✓
 เหตุผล: ${d.reason}
 
 🔴 REJECTED`,
+
+  TX_REVERSED: (d: MsgData): string =>
+`◈ CE · REVERSED ↩️
+━━━━━━━━━━━━━━
+↩️ ยกเลิกย้อนกลับรายการแล้ว
+
+🆔 ${d.id}
+📥 ${d.thb} THB
+💎 ${d.usdt} USDT
+โดย: ${d.operator || 'ADMIN'}
+เหตุผล: ${d.reason}
+
+🟤 REVERSED`,
 
   // ══ MISMATCH FLOW ════════════════════════════════════
   MISMATCH_STILL: (d: MsgData): string =>
@@ -214,6 +261,17 @@ TOTAL    ${d.usdt_expected} USDT ✓
 💎 ${d.usdt} USDT
 🏦 ${d.bank} · ${d.account}
 🟢 BANK MATCH ✓`,
+
+  MISMATCH_OVERRIDDEN: (d: MsgData): string =>
+`◈ CE · OVERRIDE ⚡
+━━━━━━━━━━━━━━
+⚡ Override บัญชีไม่ตรงสำเร็จ
+
+🆔 ${d.id}
+โดย: ${d.operator || 'OP-01'}
+เหตุผล: ${d.reason}
+
+🟡 READY TO SETTLE`,
 
   OVERRIDE_SUCCESS: (d: MsgData): string =>
 `◈ CE · OVERRIDE ⚡
@@ -256,6 +314,20 @@ SENT TOTAL  ${d.usdt_sent} USDT
 ━━━━━━━━━━━━━━
 [N] SETTLED · [N] READY · [N] PENDING · [N] SHORT`,
 
+  CYCLE_SUMMARY: (d: MsgData): string =>
+`💎 CE VAULT · SUMMARY
+━━━━━━━━━━━━━━
+🏠 CYCLE       ${d.cycle_current}
+💳 LIMIT       ฿${d.limit}
+📊 USED        ฿${d.used}
+🟢 REMAINING   ฿${d.remaining}
+📥 RECEIVED    ฿${d.thb || d.used}
+📤 SENT        ${d.usdt} USDT
+⏳ PENDING     ${d.usdt_expected} USDT
+🔴 SHORT       -${d.usdt_short} USDT
+✨ PROFIT      ฿${d.profit || '0.00'}
+💱 RATE        ${d.rate}`,
+
   NEW_CYCLE_BLOCKED: (d: MsgData): string =>
 `◈ CE · NEW CYCLE ⛔
 ━━━━━━━━━━━━━━
@@ -280,6 +352,17 @@ ${d.cycle_new}  🆕 OPEN
 📊 USED   0 THB
 
 รอบใหม่พร้อมใช้งาน`,
+
+  CYCLE_NEW_DONE: (d: MsgData): string =>
+`◈ CE · NEW CYCLE ⚡
+━━━━━━━━━━━━━━
+✅ ปิดรอบ ${d.cycle_current} → เปิดรอบ ${d.cycle_new}
+
+📥 ยอดรับรอบเก่า  ฿${d.thb}
+📤 ส่ง USDT รวม   ${d.usdt} USDT
+⏳ ยกยอดค้าง      ${d.count_pending ?? 0} รายการ
+
+🆕 ${d.cycle_new} พร้อมใช้งาน`,
 
   // ══ ALERTS ════════════════════════════════════════════
   ALERT_SHORT_30M: (d: MsgData): string =>
@@ -310,6 +393,16 @@ ${d.cycle_new}  🆕 OPEN
 
 🆔 ${d.id}
 💎 ${d.usdt} USDT
+⏰ ค้างมา ${d.minutes} นาที`,
+
+  ALERT_PENDING_STALE: (d: MsgData): string =>
+`⚠️ CE VAULT ALERT
+━━━━━━━━━━━━━━
+⚠️ รายการ PENDING ค้างนาน
+
+🆔 ${d.id}
+📥 ${d.thb} THB
+💎 ค้างส่ง ${d.usdt} USDT
 ⏰ ค้างมา ${d.minutes} นาที`,
 
   ALERT_LIMIT_80: (d: MsgData): string =>

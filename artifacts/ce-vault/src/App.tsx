@@ -582,7 +582,7 @@ export default function App() {
         usdt_short: fmtUsdt(summary?.shortUsdt || 2.56),
         profit: fmtThb(summary?.profitThb || 8742.5),
         rate: String(summary?.rate || 43.0),
-      } as never),
+      }),
     },
     {
       key: 'MSG-18',

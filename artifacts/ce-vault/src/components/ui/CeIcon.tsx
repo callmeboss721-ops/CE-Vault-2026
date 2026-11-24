@@ -9,10 +9,11 @@ export type IconName =
   // Status
   | 'ocr' | 'review' | 'mismatch' | 'ready' | 'pending' | 'settled'
   | 'short' | 'rejected' | 'reversed' | 'duplicate'
-  // Actions
+  // Actions & Entities
   | 'bank' | 'rate' | 'queue-usdt' | 'settlement' | 'summary'
   | 'new-cycle' | 'alert' | 'scan' | 'history' | 'export'
   | 'profit' | 'limit' | 'check' | 'edit' | 'close' | 'back' | 'arrow-up' | 'arrow-down' | 'refresh' | 'gem'
+  | 'send' | 'cycle' | 'pin' | 'user' | 'amount' | 'usdt' | 'trash' | 'recheck' | 'override' | 'copy'
 
 interface CeIconProps {
   name: IconName
@@ -42,7 +43,7 @@ const ICONS: Record<IconName, React.ReactNode> = {
   reversed:   <><path d="M3 7v6h6"/><path d="M3 13A9 9 0 1 0 6 6.3"/><line x1="12" y1="7" x2="12" y2="17" strokeDasharray="2 2" opacity=".4"/></>,
   duplicate:  <><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></>,
 
-  // ── ACTIONS ──
+  // ── ACTIONS & ENTITIES ──
   bank:       <><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,14 15,14 15,22"/></>,
   rate:       <><path d="M4 8h12M4 8l3-3M4 8l3 3"/><path d="M20 16H8M20 16l-3-3M20 16l-3 3"/></>,
   'queue-usdt': <><path d="M12 19V5M5 12l7-7 7 7"/><rect x="3" y="18" width="18" height="3" rx="1" opacity=".3" fill="currentColor" stroke="none"/></>,
@@ -63,6 +64,16 @@ const ICONS: Record<IconName, React.ReactNode> = {
   'arrow-down': <><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></>,
   refresh:    <><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></>,
   gem:        <><polygon points="12,2 22,8 22,16 12,22 2,16 2,8"/><polygon points="12,7 18,10 18,14 12,17 6,14 6,10" opacity=".35"/><circle cx="12" cy="12" r="2" fill="currentColor"/></>,
+  send:       <><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9"/></>,
+  cycle:      <><path d="M21 12a9 9 0 00-15.5-6.36L3 8"/><polyline points="3,3 3,8 8,8"/><path d="M3 12a9 9 0 0015.5 6.36L21 16"/><polyline points="16,16 21,16 21,21"/></>,
+  pin:        <><path d="M12 17v5"/><path d="M9 3h6l1 7 3 3v2H5v-2l3-3 1-7z"/></>,
+  user:       <><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
+  amount:     <><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/></>,
+  usdt:       <><circle cx="12" cy="12" r="9"/><path d="M8 8h8M12 8v9"/><ellipse cx="12" cy="12" rx="5" ry="1.8"/></>,
+  trash:      <><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></>,
+  recheck:    <><path d="M21 12a9 9 0 11-3-6.7L21 8"/><polyline points="21,3 21,8 16,8"/><polyline points="9,12 11,14 15,10"/></>,
+  override:   <><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></>,
+  copy:       <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></>,
 }
 
 export function CeIcon({ name, size = 20, color = 'currentColor', strokeWidth = 1.75 }: CeIconProps) {
