@@ -1,0 +1,14 @@
+{
+  "name": "ce-vault-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @workspace/api-server --filter @workspace/ce-vault run dev",
+    "dev:api": "pnpm --filter @workspace/api-server run dev",
+    "dev:web": "pnpm --filter @workspace/ce-vault run dev",
+    "build": "pnpm --filter @workspace/ce-vault run build",
+    "test:unit": "node scripts/unit-tests.mjs",
+    "verify:jwks": "node scripts/check-jwks.js"
+  }
+}

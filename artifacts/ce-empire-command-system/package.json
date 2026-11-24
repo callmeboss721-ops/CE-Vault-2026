@@ -1,0 +1,12 @@
+{
+  "name": "@workspace/ce-empire-command-system",
+  "version": "1.0.0",
+  "private": true,
+  "main": "styles.css",
+  "exports": {
+    "./styles.css": "./styles.css"
+  },
+  "scripts": {
+    "build": "echo 'Design system styles ready'"
+  }
+}

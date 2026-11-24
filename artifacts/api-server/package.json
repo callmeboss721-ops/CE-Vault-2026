@@ -1,0 +1,11 @@
+{
+  "name": "@workspace/api-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/server.mjs",
+    "start": "node src/server.mjs",
+    "build": "echo 'API server ready'"
+  }
+}

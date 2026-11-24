@@ -1,0 +1,93 @@
+modules = ["nodejs-24", "python-base-3.13", "postgresql-16"]
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "api-server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "ce-vault-web"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "verify-supabase-jwks"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "unit-tests"
+
+[[workflows.workflow]]
+name = "api-server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+
+[[workflows.workflow]]
+name = "ce-vault-web"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/ce-vault run dev"
+
+[[workflows.workflow]]
+name = "verify-supabase-jwks"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node scripts/check-jwks.js"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "unit-tests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm test:unit"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+packages = ["alsa-lib", "at-spi2-atk", "atk", "cairo", "cups", "dbus", "freetype", "glib", "gumbo", "harfbuzz", "jbig2dec", "libgbm", "libjpeg_turbo", "libxkbcommon", "mesa", "mupdf", "nspr", "nss", "openjpeg", "pango", "swig", "xcbuild", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb"]
+
+[userenv]
+
+[userenv.production]
+
+[userenv.shared]
+
+[[ports]]
+localPort = 23379
+externalPort = 80
