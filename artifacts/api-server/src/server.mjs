@@ -568,7 +568,7 @@ const server = http.createServer(async (req, res) => {
     // Update pinned bank account
     if (req.method === 'POST' && pathname === '/api/dashboard/pin') {
       const body = await parseJsonBody(req);
-      const found = state.banks.find((b) => b.code === body.code);
+      const found = state.banks.find((b) => String(b.code).toUpperCase() === String(body.code || '').toUpperCase());
       if (found) {
         state.pinnedBank = { ...found, updatedAt: `${nowHHMM()} น.` };
       } else if (body.code && body.account) {
