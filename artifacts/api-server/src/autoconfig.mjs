@@ -77,7 +77,7 @@ export function loadAutoConfig(dataDir) {
     deliveryLog: Array.isArray(runtime.deliveryLog) ? runtime.deliveryLog.slice(0, 15) : [],
     integrations: {
       storage: { enabled: true, mode: supabaseUrl && supabaseKey ? 'local-json (supabase detected)' : 'local-json' },
-      marketRate: { enabled: true, source: 'Bitkub USDT_THB → fallback Binance TH (public, no key)' },
+      marketRate: { enabled: true, source: 'Binance TH (USDTTHB) → fallback Bitkub' },
       telegram: { enabled: Boolean(telegramToken && opsChatId), token: telegramToken, chatId: opsChatId },
       supabase: { enabled: Boolean(supabaseUrl && supabaseKey), url: supabaseUrl },
     },
@@ -149,29 +149,44 @@ export function publicConfig(cfg) {
   };
 }
 
-// Live USDT/THB market rate from public endpoints (no API key).
+// Live USDT/THB market rate — Binance TH primary (no API key required).
 export async function fetchMarketRate() {
   const attempts = [
     async () => {
-      const r = await fetch('https://api.bitkub.com/api/v3/market/ticker?sym=USDT_THB', { signal: AbortSignal.timeout(6000) });
+      const r = await fetch('https://api.binance.th/api/v1/ticker/24hr?symbol=USDTTHB', { signal: AbortSignal.timeout(6000) });
       const j = await r.json();
-      const last = Number(Array.isArray(j) ? j[0]?.last : NaN);
-      if (!last) throw new Error('bitkub: no price');
-      return { rate: last, source: 'Bitkub' };
+      const last = Number(j?.lastPrice);
+      if (!last) throw new Error('binance th 24hr: no price');
+      return {
+        rate: Number(last.toFixed(2)),
+        source: 'Binance TH',
+        bid: Number(j.bidPrice || last),
+        ask: Number(j.askPrice || last),
+        high24h: Number(j.highPrice || last),
+        low24h: Number(j.lowPrice || last),
+        changePercent: Number(j.priceChangePercent || 0),
+      };
     },
     async () => {
       const r = await fetch('https://api.binance.th/api/v1/ticker/price?symbol=USDTTHB', { signal: AbortSignal.timeout(6000) });
       const j = await r.json();
       const p = Number(j?.price);
       if (!p) throw new Error('binance th: no price');
-      return { rate: p, source: 'Binance TH' };
+      return { rate: Number(p.toFixed(2)), source: 'Binance TH' };
+    },
+    async () => {
+      const r = await fetch('https://api.bitkub.com/api/v3/market/ticker?sym=USDT_THB', { signal: AbortSignal.timeout(6000) });
+      const j = await r.json();
+      const last = Number(Array.isArray(j) ? j[0]?.last : NaN);
+      if (!last) throw new Error('bitkub: no price');
+      return { rate: Number(last.toFixed(2)), source: 'Bitkub (fallback)' };
     },
     async () => {
       const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=thb', { signal: AbortSignal.timeout(6000) });
       const j = await r.json();
       const p = Number(j?.tether?.thb);
       if (!p) throw new Error('coingecko: no price');
-      return { rate: Number(p.toFixed(2)), source: 'CoinGecko' };
+      return { rate: Number(p.toFixed(2)), source: 'CoinGecko (fallback)' };
     },
   ];
   for (const fn of attempts) {

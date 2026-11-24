@@ -6,9 +6,11 @@ import {
   formatCeTransactionCard,
   formatThaiSlipDateTime,
 } from './utils/smartPin';
+import { DEFAULT_BOT_FLEET, StoredBotRecord } from './constants/botFleetSeed';
 
 const STORAGE_KEY = 'ce_vault_state_v1';
 const SETTINGS_KEY = 'ce_vault_settings_v1';
+const BOT_FLEET_KEY = 'ce_vault_bot_fleet_v1';
 
 interface BotInfo {
   id: number;
@@ -231,9 +233,23 @@ type VaultState = typeof DEFAULT_STATE;
 
 const origFetch = window.fetch.bind(window);
 let staticMode: boolean | null = null;
-const market: { rate: number | null; source: string | null; updatedAt: string | null } = {
+const market: {
+  rate: number | null;
+  source: string | null;
+  bid: number | null;
+  ask: number | null;
+  high24h: number | null;
+  low24h: number | null;
+  changePercent: number | null;
+  updatedAt: string | null;
+} = {
   rate: null,
-  source: null,
+  source: 'Binance TH',
+  bid: null,
+  ask: null,
+  high24h: null,
+  low24h: null,
+  changePercent: null,
   updatedAt: null,
 };
 
@@ -290,8 +306,69 @@ function saveState(s: VaultState) {
   }
 }
 
+function loadBotFleet(): StoredBotRecord[] {
+  try {
+    const raw = localStorage.getItem(BOT_FLEET_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_BOT_FLEET.map((b) => ({ ...b, lastRunAt: new Date().toISOString() }));
+}
+
+function saveBotFleet(bots: StoredBotRecord[]) {
+  try {
+    localStorage.setItem(BOT_FLEET_KEY, JSON.stringify(bots));
+  } catch {
+    /* ignore */
+  }
+}
+
+function sanitizeBrowserBot(bot: StoredBotRecord) {
+  const hasCustomToken = Boolean(bot.customToken);
+  return {
+    slug: bot.slug,
+    name: bot.name,
+    handle: bot.handle,
+    category: bot.category,
+    roleTh: bot.roleTh,
+    roleEn: bot.roleEn,
+    status: bot.status,
+    owner: bot.owner,
+    queueDepth: bot.queueDepth,
+    successCount: bot.successCount,
+    failureCount: bot.failureCount,
+    modes: bot.modes,
+    latestError: bot.latestError,
+    autoNotify: Boolean(bot.autoNotify),
+    lastRunAt: bot.lastRunAt,
+    telegramRoute: {
+      usesCustomToken: hasCustomToken,
+      maskedToken: hasCustomToken ? maskSecret(bot.customToken) : maskSecret(settings.botToken),
+      chatId: bot.customChatId || settings.chatId || '',
+      ready: Boolean((bot.customToken || settings.botToken) && (bot.customChatId || settings.chatId)),
+    },
+  };
+}
+
+function summarizeBrowserFleet(bots: StoredBotRecord[]) {
+  return {
+    total: bots.length,
+    active: bots.filter((b) => b.status === 'active').length,
+    paused: bots.filter((b) => b.status === 'paused').length,
+    maintenance: bots.filter((b) => b.status === 'maintenance').length,
+    error: bots.filter((b) => b.status === 'error').length,
+    totalQueue: bots.reduce((s, b) => s + Number(b.queueDepth || 0), 0),
+    totalSuccess: bots.reduce((s, b) => s + Number(b.successCount || 0), 0),
+  };
+}
+
 let settings: LocalSettings = loadSettings();
 let state: VaultState = loadState();
+let botFleet: StoredBotRecord[] = loadBotFleet();
 
 function nowHHMM(): string {
   return new Date().toTimeString().slice(0, 5);
@@ -316,20 +393,44 @@ function rebaseSeed(s: VaultState, rate: number) {
 }
 
 async function refreshBrowserMarket() {
-  const sources: Array<() => Promise<{ rate: number; source: string }>> = [
+  const sources: Array<
+    () => Promise<{ rate: number; source: string; bid?: number; ask?: number; high24h?: number; low24h?: number; changePercent?: number }>
+  > = [
+    async () => {
+      const r = await origFetch('https://api.binance.th/api/v1/ticker/24hr?symbol=USDTTHB');
+      const j = await r.json();
+      const last = Number(j?.lastPrice);
+      if (!last) throw new Error('no price');
+      return {
+        rate: Number(last.toFixed(2)),
+        source: 'Binance TH',
+        bid: Number(j.bidPrice || last),
+        ask: Number(j.askPrice || last),
+        high24h: Number(j.highPrice || last),
+        low24h: Number(j.lowPrice || last),
+        changePercent: Number(j.priceChangePercent || 0),
+      };
+    },
+    async () => {
+      const r = await origFetch('https://api.binance.th/api/v1/ticker/price?symbol=USDTTHB');
+      const j = await r.json();
+      const p = Number(j?.price);
+      if (!p) throw new Error('no price');
+      return { rate: Number(p.toFixed(2)), source: 'Binance TH' };
+    },
     async () => {
       const r = await origFetch('https://api.bitkub.com/api/v3/market/ticker?sym=USDT_THB');
       const j = await r.json();
       const last = Number(Array.isArray(j) ? j[0]?.last : NaN);
       if (!last) throw new Error('no price');
-      return { rate: last, source: 'Bitkub' };
+      return { rate: Number(last.toFixed(2)), source: 'Bitkub (fallback)' };
     },
     async () => {
       const r = await origFetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=thb');
       const j = await r.json();
       const last = Number(j?.tether?.thb);
       if (!last) throw new Error('no price');
-      return { rate: Number(last.toFixed(2)), source: 'CoinGecko' };
+      return { rate: Number(last.toFixed(2)), source: 'CoinGecko (fallback)' };
     },
   ];
 
@@ -338,6 +439,11 @@ async function refreshBrowserMarket() {
       const m = await fn();
       market.rate = m.rate;
       market.source = m.source;
+      market.bid = m.bid ?? m.rate;
+      market.ask = m.ask ?? m.rate;
+      market.high24h = m.high24h ?? m.rate;
+      market.low24h = m.low24h ?? m.rate;
+      market.changePercent = m.changePercent ?? 0;
       market.updatedAt = new Date().toISOString();
       state.marketRate = m.rate;
       const autoDesk = Number((m.rate + settings.rateSpread).toFixed(2));
@@ -720,11 +826,115 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     return jsonRes(200, {
       ok: true,
       rate: market.rate ?? state.marketRate,
-      source: market.source || 'Bitkub',
+      source: market.source || 'Binance TH',
+      bid: market.bid ?? market.rate ?? state.marketRate,
+      ask: market.ask ?? market.rate ?? state.marketRate,
+      high24h: market.high24h ?? market.rate ?? state.marketRate,
+      low24h: market.low24h ?? market.rate ?? state.marketRate,
+      changePercent: market.changePercent ?? 0,
       updatedAt: market.updatedAt || new Date().toISOString(),
       deskRate: state.rate,
       rateMode: state.rateMode || 'auto',
       spread: settings.rateSpread,
+    });
+  }
+
+  if (method === 'GET' && pathname === '/api/bots') {
+    return jsonRes(200, {
+      ok: true,
+      summary: summarizeBrowserFleet(botFleet),
+      bots: botFleet.map(sanitizeBrowserBot),
+    });
+  }
+
+  if (method === 'POST' && pathname === '/api/bots/broadcast-fleet') {
+    const fleetSum = summarizeBrowserFleet(botFleet);
+    const lines = [
+      '◈ CE EMPIRE · BOT FLEET STATUS (สถานะบอททั้งระบบ)',
+      '━━━━━━━━━━━━━━',
+      `🟢 ออนไลน์ (Active): ${fleetSum.active} / ${fleetSum.total} บอท`,
+      `📈 เรทตลาด (Binance TH): ${(market.rate ?? state.marketRate).toFixed(2)} THB (เรทโต๊ะ ${state.rate.toFixed(2)})`,
+      `📌 บัญชีหลัก (PIN): ${state.pinnedBank.code} · ${state.pinnedBank.account}`,
+      '─────────────',
+      ...botFleet.map((b) => {
+        const icon = b.status === 'active' ? '🟢' : b.status === 'paused' ? '🟡' : b.status === 'error' ? '🔴' : '🔧';
+        return `${icon} ${b.name} (${b.handle}) · ${b.status.toUpperCase()}`;
+      }),
+    ];
+    const res = await browserSendTelegram(lines.join('\n'), 'fleet-broadcast', undefined, body.chatId || undefined);
+    return jsonRes(res.ok ? 200 : 400, { ...res, deliveryLog: settings.deliveryLog });
+  }
+
+  const botMatch = pathname.match(/^\/api\/bots\/([^/]+)\/(action|config)$/);
+  if (method === 'POST' && botMatch) {
+    const slug = decodeURIComponent(botMatch[1]);
+    const mode = botMatch[2];
+    const bot = botFleet.find((b) => b.slug === slug);
+    if (!bot) return jsonRes(404, { ok: false, error: 'bot_not_found', message: `ไม่พบบอท: ${slug}` });
+
+    if (mode === 'config') {
+      if (typeof body.customToken === 'string' && !body.customToken.includes('••••')) bot.customToken = body.customToken.trim();
+      if (body.clearCustomToken === true) bot.customToken = '';
+      if (typeof body.customChatId === 'string') bot.customChatId = body.customChatId.trim();
+      if (typeof body.autoNotify === 'boolean') bot.autoNotify = body.autoNotify;
+      if (typeof body.handle === 'string' && body.handle.trim()) bot.handle = body.handle.trim();
+      saveBotFleet(botFleet);
+      return jsonRes(200, {
+        ok: true,
+        bot: sanitizeBrowserBot(bot),
+        summary: summarizeBrowserFleet(botFleet),
+        bots: botFleet.map(sanitizeBrowserBot),
+      });
+    }
+
+    const act = String(body.action || '').toLowerCase();
+    let telegram: Awaited<ReturnType<typeof browserSendTelegram>> | null = null;
+    if (act === 'start' || act === 'resume') {
+      bot.status = 'active';
+      bot.latestError = null;
+      bot.lastRunAt = new Date().toISOString();
+    } else if (act === 'pause') {
+      bot.status = 'paused';
+    } else if (act === 'maintenance') {
+      bot.status = 'maintenance';
+    } else if (act === 'retry') {
+      bot.status = 'active';
+      bot.latestError = null;
+      bot.queueDepth = Math.max(0, bot.queueDepth - 1);
+      bot.successCount += 1;
+      bot.lastRunAt = new Date().toISOString();
+    } else if (act === 'dispatch') {
+      bot.successCount += 1;
+      bot.lastRunAt = new Date().toISOString();
+      const text =
+        typeof body.text === 'string' && body.text.trim()
+          ? body.text.trim()
+          : [
+              `◈ CE · ${bot.name} (${bot.handle})`,
+              `🟢 สถานะ (Status): ${bot.status.toUpperCase()}`,
+              `📋 หน้าที่ (Role): ${bot.roleTh}`,
+              `📈 เรทตลาด Binance TH: ${(market.rate ?? state.marketRate).toFixed(2)} THB · เรทโต๊ะ ${state.rate.toFixed(2)} THB`,
+              `📊 งานสำเร็จ (Processed): ${bot.successCount.toLocaleString()} · คิวรอ (Queue): ${bot.queueDepth}`,
+              `⏱️ เวลา (Time): ${nowHHMM()} น.`,
+            ].join('\n');
+      telegram = await browserSendTelegram(
+        text,
+        `bot:${bot.slug}`,
+        bot.customToken || undefined,
+        bot.customChatId || body.chatId || undefined
+      );
+    } else {
+      return jsonRes(400, { ok: false, error: 'unknown_bot_action' });
+    }
+
+    saveBotFleet(botFleet);
+    return jsonRes(200, {
+      ok: true,
+      bot: sanitizeBrowserBot(bot),
+      summary: summarizeBrowserFleet(botFleet),
+      bots: botFleet.map(sanitizeBrowserBot),
+      telegram,
+      deliveryLog: settings.deliveryLog,
     });
   }
 

@@ -10,6 +10,7 @@ import {
 } from './components/ui';
 import { MSG } from './constants/messages';
 import { parseSmartPinText, formatThaiSlipDateTime } from './utils/smartPin';
+import { BotRecord, FleetSummary } from './constants/botFleetSeed';
 
 interface SettlementEntry {
   id: string;
@@ -107,7 +108,7 @@ interface NotifyEvents {
   onNewCycle: boolean;
 }
 
-type MainTab = 'desk' | 'scan' | 'messages' | 'settings' | 'design';
+type MainTab = 'desk' | 'bots' | 'scan' | 'messages' | 'settings' | 'design';
 type PanelMode = 'tx' | 'summary' | 'pin' | 'rate' | 'cycle';
 
 const ALL_ICONS: IconName[] = [
@@ -139,6 +140,13 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [banks, setBanks] = useState<BankOption[]>([]);
   const [cycleHistory, setCycleHistory] = useState<CycleRecord[]>([]);
+  const [bots, setBots] = useState<BotRecord[]>([]);
+  const [fleetSummary, setFleetSummary] = useState<FleetSummary | null>(null);
+  const [botCatFilter, setBotCatFilter] = useState<string>('ALL');
+  const [editingBotSlug, setEditingBotSlug] = useState<string | null>(null);
+  const [botCustomToken, setBotCustomToken] = useState<string>('');
+  const [botCustomChatId, setBotCustomChatId] = useState<string>('');
+  const [botHandleInput, setBotHandleInput] = useState<string>('');
   const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState<PanelMode>('tx');
   const [statusFilter, setStatusFilter] = useState<TxStatus | 'ALL'>('ALL');
@@ -147,7 +155,17 @@ export default function App() {
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
   const [apiLatencyMs, setApiLatencyMs] = useState<number | null>(null);
   const [engineMode, setEngineMode] = useState<string>('backend-api-server');
-  const [market, setMarket] = useState<{ rate?: number; source?: string; rateMode?: string; updatedAt?: string } | null>(null);
+  const [market, setMarket] = useState<{
+    rate?: number;
+    source?: string;
+    bid?: number;
+    ask?: number;
+    high24h?: number;
+    low24h?: number;
+    changePercent?: number;
+    rateMode?: string;
+    updatedAt?: string;
+  } | null>(null);
   const [autoCfg, setAutoCfg] = useState<{
     rateSpread?: number;
     autoSecrets?: Record<string, string>;
@@ -266,19 +284,110 @@ export default function App() {
     }
   }, []);
 
+  const fetchBots = useCallback(async () => {
+    try {
+      const res = await fetch('/api/bots');
+      if (res.ok) {
+        const data = await res.json();
+        setBots(data.bots || []);
+        setFleetSummary(data.summary || null);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     fetchVault();
     fetchSettings();
-  }, [fetchVault, fetchSettings]);
+    fetchBots();
+  }, [fetchVault, fetchSettings, fetchBots]);
 
   useEffect(() => {
     fetchMarket();
     const id = setInterval(() => {
       fetchMarket();
       fetchVault();
+      fetchBots();
     }, 60000);
     return () => clearInterval(id);
-  }, [fetchMarket, fetchVault]);
+  }, [fetchMarket, fetchVault, fetchBots]);
+
+  async function handleBotAction(slug: string, action: 'start' | 'pause' | 'maintenance' | 'retry' | 'dispatch') {
+    setLoadingAction(`bot:${slug}:${action}`);
+    try {
+      const res = await fetch(`/api/bots/${encodeURIComponent(slug)}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(`❌ ${data.message || 'สั่งการบอทไม่สำเร็จ (Bot Action Failed)'}`);
+        return;
+      }
+      if (Array.isArray(data.bots)) setBots(data.bots);
+      if (data.summary) setFleetSummary(data.summary);
+      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
+      if (action === 'dispatch') {
+        if (data.telegram?.ok) {
+          showToast(`🚀 ${data.bot.name} ส่งรายงานเข้า Telegram สำเร็จ (msg #${data.telegram.messageId})`);
+        } else {
+          showToast(`⚠️ ส่งเข้า Telegram ไม่สำเร็จ: ${data.telegram?.description || 'กรุณาตั้งค่า Token & Chat ID ในแท็บ Settings'}`);
+        }
+      } else {
+        showToast(`🤖 อัปเดตบอท ${data.bot.name} → ${data.bot.status.toUpperCase()}`);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function handleSaveBotConfig(slug: string, clearCustomToken = false) {
+    setLoadingAction(`bot-cfg:${slug}`);
+    try {
+      const res = await fetch(`/api/bots/${encodeURIComponent(slug)}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customToken: clearCustomToken ? '' : botCustomToken || undefined,
+          clearCustomToken,
+          customChatId: botCustomChatId,
+          handle: botHandleInput || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        if (Array.isArray(data.bots)) setBots(data.bots);
+        if (data.summary) setFleetSummary(data.summary);
+        setEditingBotSlug(null);
+        setBotCustomToken('');
+        showToast(`💾 บันทึกการตั้งค่าบอท ${data.bot.name} เรียบร้อยแล้ว (Bot Config Saved)`);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function handleBroadcastFleet() {
+    setLoadingAction('broadcast-fleet');
+    try {
+      const res = await fetch('/api/bots/broadcast-fleet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
+      if (res.ok && data.ok) {
+        showToast(`📡 ส่งสถานะบอททั้ง ${fleetSummary?.total || 14} ตัวเข้า Telegram สำเร็จ! (msg #${data.messageId})`);
+      } else {
+        showToast(`❌ ส่งสถานะไม่สำเร็จ: ${data.description || 'กรุณาตั้งค่า Telegram Bot'}`);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  }
 
   const selectedTx = transactions.find((t) => t.id === selectedTxId) || transactions[0] || null;
 
@@ -1133,7 +1242,9 @@ export default function App() {
           </div>
 
           <div
+            onClick={handleRefreshMarketNow}
             style={{
+              cursor: 'pointer',
               padding: '6px 11px',
               borderRadius: '8px',
               background: 'var(--b2)',
@@ -1143,10 +1254,14 @@ export default function App() {
               gap: '7px',
               fontSize: '11px',
             }}
-            title={market?.source ? `แหล่งข้อมูล (Source): ${market.source}` : 'กำลังโหลดเรทตลาด (Loading Market Rate)'}
+            title={
+              market?.bid && market?.ask
+                ? `${market.source || 'Binance TH'} · Bid ${market.bid.toFixed(2)} / Ask ${market.ask.toFixed(2)} · 24h ${market.low24h?.toFixed(2)}–${market.high24h?.toFixed(2)} (คลิกเพื่อรีเฟรช)`
+                : 'คลิกเพื่อดึงเรทตลาด Binance TH ล่าสุด'
+            }
           >
             <CeIcon name="usdt" size={14} color="var(--c)" />
-            <span style={{ color: 'var(--t3)' }}>ตลาด (MKT):</span>
+            <span style={{ color: 'var(--t3)' }}>{market?.source || 'Binance TH'}:</span>
             <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
               {market?.rate ? market.rate.toFixed(2) : '—'}
             </strong>
@@ -1154,7 +1269,7 @@ export default function App() {
           </div>
 
           <div
-            onClick={() => setActiveTab('settings')}
+            onClick={() => setActiveTab('bots')}
             style={{
               cursor: 'pointer',
               padding: '6px 10px',
@@ -1168,12 +1283,14 @@ export default function App() {
               fontWeight: 700,
               color: tgConnected ? 'var(--s)' : 'var(--w)',
             }}
-            title="คลิกเพื่อตั้งค่าและทดสอบ Telegram Bot (Configure & Test Telegram Bot)"
+            title="ศูนย์ควบคุมบอททั้งหมด (Open CE Empire Bot Fleet)"
           >
             <CeIcon name="bot" size={13} color={tgConnected ? 'var(--s)' : 'var(--w)'} />
-            {tgConnected
-              ? `TG ${botInfo?.username ? `@${botInfo.username}` : 'พร้อมส่ง (Ready)'}`
-              : 'ตั้งค่าบอท (Setup TG Bot)'}
+            {fleetSummary
+              ? `BOTS ${fleetSummary.active}/${fleetSummary.total} ONLINE`
+              : tgConnected
+              ? `TG ${botInfo?.username ? `@${botInfo.username}` : 'Ready'}`
+              : 'ตั้งค่าบอท (Setup Bot)'}
           </div>
 
           <div
@@ -1210,6 +1327,7 @@ export default function App() {
           {(
             [
               { id: 'desk', label: '🖥️ โต๊ะปฏิบัติการ (Desk)' },
+              { id: 'bots', label: `🤖 บอททั้งหมด (Bots · ${fleetSummary?.total || 14})` },
               { id: 'scan', label: '📷 สแกนสลิป (Scan OCR)' },
               { id: 'messages', label: '💬 ข้อความบอท (Messages)' },
               { id: 'settings', label: '⚙️ ตั้งค่า API & บอท (Settings)' },
@@ -2737,6 +2855,414 @@ export default function App() {
                     </pre>
                   </div>
                 ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/* TAB: CE EMPIRE BOT FLEET (14 SPECIALIZED BOTS) */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeTab === 'bots' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Fleet Header Banner */}
+            <div
+              style={{
+                background: 'var(--b2)',
+                border: '1px solid var(--cb)',
+                borderRadius: '14px',
+                padding: '18px 22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '16px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div
+                  style={{
+                    width: '44px',
+                    height: '44px',
+                    borderRadius: '12px',
+                    background: 'var(--ca)',
+                    border: '1px solid var(--cb)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CeIcon name="bot" size={24} color="var(--c)" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '17px', fontWeight: 800, color: 'var(--t1)' }}>
+                    ศูนย์ควบคุมบอทครบระบบ CE Empire (All {fleetSummary?.total || 14} Operational Bots)
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--t2)' }}>
+                    เชื่อมเรทตลาดสด Binance TH ({market?.rate ? `${market.rate.toFixed(2)} THB` : '—'}) · บอททุกตัวยิงรายงานเข้า Telegram จริงได้ทันที หรือผูก Token แยกทีละบอทได้
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <CeButton
+                  variant="primary"
+                  size="sm"
+                  loading={loadingAction === 'broadcast-fleet'}
+                  onClick={handleBroadcastFleet}
+                  icon={<CeIcon name="send" size={14} color="var(--b0)" />}
+                >
+                  📡 ส่งสถานะบอททั้ง {fleetSummary?.total || 14} ตัวเข้า Telegram (Broadcast)
+                </CeButton>
+                <CeButton
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setActiveTab('settings')}
+                  icon={<CeIcon name="settings" size={14} color="var(--c)" />}
+                >
+                  ⚙️ ตั้งค่า Token หลัก (Main Bot)
+                </CeButton>
+              </div>
+            </div>
+
+            {/* Fleet KPI Strip */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+              }}
+            >
+              <KpiCard
+                label="บอททั้งหมด (Total Bots)"
+                value={String(fleetSummary?.total ?? bots.length)}
+                unit="BOTS"
+                note="CE Empire Full Fleet"
+                color="cyan"
+                icon={<CeIcon name="bot" size={14} color="#00d4ff" />}
+              />
+              <KpiCard
+                label="กำลังทำงาน (Active)"
+                value={String(fleetSummary?.active ?? 0)}
+                unit="ONLINE"
+                note="พร้อมรับงานและส่งแจ้งเตือน"
+                color="green"
+                icon={<CeIcon name="settled" size={14} color="#00e676" />}
+              />
+              <KpiCard
+                label="พัก / บำรุงรักษา (Paused)"
+                value={String((fleetSummary?.paused ?? 0) + (fleetSummary?.maintenance ?? 0))}
+                unit="IDLE"
+                note={`Error: ${fleetSummary?.error ?? 0}`}
+                color="yellow"
+                icon={<CeIcon name="pending" size={14} color="#ffca28" />}
+              />
+              <KpiCard
+                label="เรทตลาดสด (Binance TH)"
+                value={market?.rate ? market.rate.toFixed(2) : '—'}
+                unit="THB"
+                note={
+                  market?.bid && market?.ask
+                    ? `Bid ${market.bid.toFixed(2)} · Ask ${market.ask.toFixed(2)}`
+                    : 'USDTTHB Live Spot'
+                }
+                color="gold"
+                icon={<CeIcon name="rate" size={14} color="#f0b429" />}
+              />
+              <KpiCard
+                label="งานที่ประมวลผลแล้ว (Processed)"
+                value={fmtInt(fleetSummary?.totalSuccess ?? 0)}
+                unit="JOBS"
+                note={`คิวรอ (Queue): ${fleetSummary?.totalQueue ?? 0}`}
+                color="cyan"
+                icon={<CeIcon name="profit" size={14} color="#00d4ff" />}
+              />
+            </div>
+
+            {/* Category Filters */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {['ALL', 'Core Ops', 'Monitoring & Reports', 'AI & Visual', 'QA & Security'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setBotCatFilter(cat)}
+                    style={{
+                      padding: '6px 13px',
+                      borderRadius: '9999px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: botCatFilter === cat ? '1px solid var(--cb)' : '1px solid var(--br)',
+                      background: botCatFilter === cat ? 'var(--ca)' : 'var(--b2)',
+                      color: botCatFilter === cat ? 'var(--c)' : 'var(--t2)',
+                    }}
+                  >
+                    {cat === 'ALL' ? `ทั้งหมด (ALL · ${bots.length})` : cat}
+                  </button>
+                ))}
+              </div>
+              <CeButton variant="ghost" size="sm" onClick={fetchBots}>
+                🔄 รีเฟรชสถานะบอท (Refresh)
+              </CeButton>
+            </div>
+
+            {/* Bot Cards Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+                gap: '14px',
+              }}
+            >
+              {bots
+                .filter((b) => (botCatFilter === 'ALL' ? true : b.category === botCatFilter))
+                .map((bot) => {
+                  const statusColor =
+                    bot.status === 'active'
+                      ? 'var(--s)'
+                      : bot.status === 'paused'
+                      ? 'var(--w)'
+                      : bot.status === 'error'
+                      ? 'var(--d)'
+                      : 'var(--c)';
+                  const statusBg =
+                    bot.status === 'active'
+                      ? 'var(--sa)'
+                      : bot.status === 'paused'
+                      ? 'var(--wa)'
+                      : bot.status === 'error'
+                      ? 'var(--da)'
+                      : 'var(--ca)';
+                  const isEditing = editingBotSlug === bot.slug;
+
+                  return (
+                    <div
+                      key={bot.slug}
+                      style={{
+                        background: 'var(--b2)',
+                        border: `1px solid ${bot.slug === 'operator-vault' ? 'var(--cb)' : 'var(--br)'}`,
+                        borderRadius: '14px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--t1)' }}>{bot.name}</span>
+                            <span style={{ fontSize: '10px', color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
+                              {bot.handle}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--t3)', marginTop: '2px' }}>
+                            {bot.category} · Owner: {bot.owner}
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            padding: '3px 9px',
+                            borderRadius: '9999px',
+                            fontSize: '9px',
+                            fontWeight: 800,
+                            letterSpacing: '0.8px',
+                            textTransform: 'uppercase',
+                            color: statusColor,
+                            background: statusBg,
+                            border: `1px solid ${statusColor}`,
+                          }}
+                        >
+                          ● {bot.status}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: 1.45 }}>
+                        <div>{bot.roleTh}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--t3)', marginTop: '2px' }}>({bot.roleEn})</div>
+                      </div>
+
+                      {/* Operating Modes */}
+                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                        {bot.modes.map((m) => (
+                          <span
+                            key={m}
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '6px',
+                              background: 'var(--b3)',
+                              border: '1px solid var(--br)',
+                              fontSize: '9px',
+                              fontFamily: "'Space Mono', monospace",
+                              color: 'var(--t2)',
+                            }}
+                          >
+                            {m}
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Telemetry */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          background: 'var(--b1)',
+                          border: '1px solid var(--br)',
+                          borderRadius: '8px',
+                          padding: '8px 10px',
+                          fontSize: '10px',
+                          fontFamily: "'Space Mono', monospace",
+                        }}
+                      >
+                        <span style={{ color: 'var(--t3)' }}>
+                          OK: <strong style={{ color: 'var(--s)' }}>{fmtInt(bot.successCount)}</strong>
+                        </span>
+                        <span style={{ color: 'var(--t3)' }}>
+                          QUEUE: <strong style={{ color: 'var(--c)' }}>{bot.queueDepth}</strong>
+                        </span>
+                        <span style={{ color: 'var(--t3)' }}>
+                          TG:{' '}
+                          <strong style={{ color: bot.telegramRoute?.ready ? 'var(--s)' : 'var(--w)' }}>
+                            {bot.telegramRoute?.usesCustomToken ? 'Dedicated' : bot.telegramRoute?.ready ? 'Linked ✓' : 'Unset'}
+                          </strong>
+                        </span>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {bot.status === 'active' ? (
+                          <CeButton
+                            variant="ghost"
+                            size="sm"
+                            loading={loadingAction === `bot:${bot.slug}:pause`}
+                            onClick={() => handleBotAction(bot.slug, 'pause')}
+                          >
+                            ⏸ พัก (Pause)
+                          </CeButton>
+                        ) : (
+                          <CeButton
+                            variant="success"
+                            size="sm"
+                            loading={loadingAction === `bot:${bot.slug}:start`}
+                            onClick={() => handleBotAction(bot.slug, 'start')}
+                          >
+                            ▶ เปิด (Start)
+                          </CeButton>
+                        )}
+                        <CeButton
+                          variant="outline"
+                          size="sm"
+                          loading={loadingAction === `bot:${bot.slug}:dispatch`}
+                          onClick={() => handleBotAction(bot.slug, 'dispatch')}
+                        >
+                          📨 ส่ง TG (Test)
+                        </CeButton>
+                        <CeButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (isEditing) {
+                              setEditingBotSlug(null);
+                            } else {
+                              setEditingBotSlug(bot.slug);
+                              setBotCustomToken('');
+                              setBotCustomChatId(bot.telegramRoute?.chatId || '');
+                              setBotHandleInput(bot.handle);
+                            }
+                          }}
+                        >
+                          ⚙️ {isEditing ? 'ปิด (Close)' : 'ตั้งค่า (Config)'}
+                        </CeButton>
+                      </div>
+
+                      {/* Per-Bot Optional Dedicated Token & Chat ID Drawer */}
+                      {isEditing && (
+                        <div
+                          style={{
+                            marginTop: '4px',
+                            padding: '12px',
+                            borderRadius: '10px',
+                            background: 'var(--b1)',
+                            border: '1px solid var(--cb)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                          }}
+                        >
+                          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--c)' }}>
+                            ⚙️ ตั้งค่าเฉพาะบอท (Optional Dedicated Bot Token / Chat ID)
+                          </div>
+                          <input
+                            placeholder="ชื่อ Handle เช่น @my_bot"
+                            value={botHandleInput}
+                            onChange={(e) => setBotHandleInput(e.target.value)}
+                            style={{
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              background: 'var(--b2)',
+                              border: '1px solid var(--br)',
+                              color: 'var(--t1)',
+                              fontSize: '11px',
+                              fontFamily: "'Space Mono', monospace",
+                            }}
+                          />
+                          <input
+                            type="password"
+                            placeholder={
+                              bot.telegramRoute?.usesCustomToken
+                                ? `Token เฉพาะ: ${bot.telegramRoute.maskedToken}`
+                                : 'เว้นว่าง = ใช้บอทหลัก @Razen_7xbot อัตโนมัติ'
+                            }
+                            value={botCustomToken}
+                            onChange={(e) => setBotCustomToken(e.target.value)}
+                            style={{
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              background: 'var(--b2)',
+                              border: '1px solid var(--br)',
+                              color: 'var(--t1)',
+                              fontSize: '11px',
+                              fontFamily: "'Space Mono', monospace",
+                            }}
+                          />
+                          <input
+                            placeholder="Chat ID เฉพาะบอทนี้ (เว้นว่าง = ใช้กลุ่มหลัก)"
+                            value={botCustomChatId}
+                            onChange={(e) => setBotCustomChatId(e.target.value)}
+                            style={{
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              background: 'var(--b2)',
+                              border: '1px solid var(--br)',
+                              color: 'var(--g)',
+                              fontSize: '11px',
+                              fontFamily: "'Space Mono', monospace",
+                            }}
+                          />
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <CeButton
+                              variant="success"
+                              size="sm"
+                              loading={loadingAction === `bot-cfg:${bot.slug}`}
+                              onClick={() => handleSaveBotConfig(bot.slug, false)}
+                            >
+                              💾 บันทึก (Save)
+                            </CeButton>
+                            {bot.telegramRoute?.usesCustomToken && (
+                              <CeButton
+                                variant="danger"
+                                size="sm"
+                                onClick={() => handleSaveBotConfig(bot.slug, true)}
+                              >
+                                ใช้บอทหลัก (Reset)
+                              </CeButton>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}
