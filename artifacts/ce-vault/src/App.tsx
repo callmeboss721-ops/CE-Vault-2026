@@ -106,6 +106,17 @@ export default function App() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
+  const [market, setMarket] = useState<{ rate?: number; source?: string; rateMode?: string; updatedAt?: string } | null>(null);
+  const [autoCfg, setAutoCfg] = useState<{
+    rateSpread?: number;
+    autoSecrets?: Record<string, string>;
+    integrations?: {
+      storage?: { enabled: boolean; mode: string };
+      marketRate?: { enabled: boolean; source: string };
+      telegram?: { enabled: boolean };
+      supabase?: { enabled: boolean };
+    };
+  } | null>(null);
 
   // Action form states
   const [settleAmount, setSettleAmount] = useState<string>('');
@@ -158,6 +169,25 @@ export default function App() {
   useEffect(() => {
     fetchVault();
   }, [fetchVault]);
+
+  const fetchMarket = useCallback(async () => {
+    try {
+      const [mRes, cRes] = await Promise.all([fetch('/api/market'), fetch('/api/config')]);
+      if (mRes.ok) setMarket(await mRes.json());
+      if (cRes.ok) setAutoCfg(await cRes.json());
+    } catch {
+      /* offline: keep last known values */
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMarket();
+    const id = setInterval(() => {
+      fetchMarket();
+      fetchVault();
+    }, 60000);
+    return () => clearInterval(id);
+  }, [fetchMarket, fetchVault]);
 
   const selectedTx = transactions.find((t) => t.id === selectedTxId) || transactions[0] || null;
 
@@ -301,7 +331,28 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.ok) {
         setSummary(data.summary);
+        fetchMarket();
         showToast(`💱 อัปเดตเรทโต๊ะเป็น ${data.rate.toFixed(2)} THB/USDT`);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function handleAutoRate() {
+    setLoadingAction('rate-auto');
+    try {
+      const res = await fetch('/api/dashboard/rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto: true }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setSummary(data.summary);
+        setRateInput(String(data.rate));
+        fetchMarket();
+        showToast(`🤖 เรทโต๊ะ AUTO ตามตลาด: ${data.rate.toFixed(2)} THB/USDT`);
       }
     } finally {
       setLoadingAction(null);
@@ -679,6 +730,27 @@ export default function App() {
             <strong style={{ color: 'var(--g)', fontFamily: "'Space Mono', monospace" }}>
               {summary ? summary.rate.toFixed(2) : '43.00'} THB
             </strong>
+          </div>
+
+          <div
+            style={{
+              padding: '6px 12px',
+              borderRadius: '8px',
+              background: 'var(--b2)',
+              border: '1px solid var(--br)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '11px',
+            }}
+            title={market?.source ? `แหล่งข้อมูล: ${market.source}` : 'กำลังโหลดเรทตลาด'}
+          >
+            <CeIcon name="usdt" size={14} color="var(--c)" />
+            <span style={{ color: 'var(--t3)' }}>MKT:</span>
+            <strong style={{ color: 'var(--c)', fontFamily: "'Space Mono', monospace" }}>
+              {market?.rate ? market.rate.toFixed(2) : '—'}
+            </strong>
+            <span style={{ color: 'var(--t3)', fontSize: '9px' }}>{market?.rateMode === 'auto' ? 'AUTO' : 'MANUAL'}</span>
           </div>
 
           <div
@@ -1565,6 +1637,35 @@ export default function App() {
                       >
                         อัปเดตเรทโต๊ะ
                       </CeButton>
+                      <CeButton
+                        variant="ghost"
+                        onClick={handleAutoRate}
+                        loading={loadingAction === 'rate-auto'}
+                        icon={<CeIcon name="usdt" size={14} color="var(--c)" />}
+                      >
+                        🤖 AUTO ตามตลาด ({market?.rate ? market.rate.toFixed(2) : '—'} + {autoCfg?.rateSpread ?? 0.3})
+                      </CeButton>
+                      <div
+                        style={{
+                          marginTop: '6px',
+                          padding: '10px',
+                          borderRadius: '8px',
+                          background: 'var(--b1)',
+                          border: '1px solid var(--br)',
+                          fontSize: '11px',
+                          color: 'var(--t2)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                        }}
+                      >
+                        <strong style={{ color: 'var(--t1)' }}>⚙️ Zero-config integrations</strong>
+                        <span>📈 Market: {market?.source || '—'} · โหมด {market?.rateMode === 'auto' ? 'AUTO' : 'MANUAL'}</span>
+                        <span>💾 Storage: {autoCfg?.integrations?.storage?.mode || 'local-json'}</span>
+                        <span>📨 Telegram: {autoCfg?.integrations?.telegram?.enabled ? '✅ เชื่อมแล้ว' : '⏸ ปิด (ใส่ BOT_TOKEN + OPS_CHAT_ID เพื่อเปิด)'}</span>
+                        <span>🗄 Supabase: {autoCfg?.integrations?.supabase?.enabled ? '✅ ตรวจพบ' : '⏸ ไม่ได้ตั้ง (ไม่จำเป็น)'}</span>
+                        <span>🔐 Secrets: {autoCfg?.autoSecrets ? `${Object.keys(autoCfg.autoSecrets).length} ค่า สร้างอัตโนมัติ` : '—'}</span>
+                      </div>
                     </div>
                   </>
                 )}

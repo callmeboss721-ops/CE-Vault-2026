@@ -2,11 +2,17 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadAutoConfig, publicConfig, fetchMarketRate, sendTelegram } from './autoconfig.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.CE_DATA_DIR || path.join(__dirname, '..', 'data');
 const STATE_FILE = path.join(DATA_DIR, 'vault-state.json');
-const PORT = Number(process.env.API_PORT || 3001);
+// API_PORT for dev (behind Vite proxy); PORT for single-process production (serves web + API).
+const PORT = Number(process.env.API_PORT || process.env.PORT || 3001);
+const STATIC_DIR = path.join(__dirname, '..', '..', 'ce-vault', 'dist', 'public');
+const SERVE_STATIC = process.env.CE_SERVE_STATIC === '1' && fs.existsSync(STATIC_DIR);
+const CFG = loadAutoConfig(DATA_DIR);
+const market = { rate: null, source: null, updatedAt: null };
 
 const DEFAULT_STATE = {
   cycle: 'CE44',
@@ -275,6 +281,55 @@ function sendJson(res, status, payload) {
 
 let state = loadState();
 
+// Rebase demo seed to the live market rate once, so numbers are realistic out of the box.
+function rebaseSeed(rate) {
+  state.rate = rate;
+  for (const tx of state.transactions) {
+    const oldExpected = tx.usdtExpected || 1;
+    const ratio = tx.usdtSent / oldExpected;
+    tx.rate = rate;
+    tx.usdtExpected = Number((tx.thb / rate).toFixed(2));
+    if (tx.status === 'SETTLED') tx.usdtSent = tx.usdtExpected;
+    else if (tx.status === 'SHORT') tx.usdtSent = Number(Math.max(0, tx.usdtExpected - 2.56).toFixed(2));
+    else tx.usdtSent = Number((tx.usdtExpected * ratio).toFixed(2));
+    for (const se of tx.settlements || []) se.usdt = tx.usdtSent / Math.max(1, tx.settlements.length);
+  }
+  if (state.transactions.find((t) => t.status === 'SHORT')) {
+    const s = state.transactions.find((t) => t.status === 'SHORT');
+    s.notes = `ส่งขาด ▼ ${(s.usdtExpected - s.usdtSent).toFixed(2)} USDT — รอส่งเพิ่ม`;
+  }
+}
+
+async function refreshMarket() {
+  const m = await fetchMarketRate();
+  if (!m) return;
+  market.rate = m.rate;
+  market.source = m.source;
+  market.updatedAt = new Date().toISOString();
+  state.marketRate = m.rate;
+  const autoDesk = Number((m.rate + CFG.rateSpread).toFixed(2));
+  if (!state.autoRateSeeded) {
+    rebaseSeed(autoDesk);
+    state.autoRateSeeded = true;
+    state.rateMode = 'auto';
+  } else if (state.rateMode === 'auto') {
+    state.rate = autoDesk;
+  }
+  saveState(state);
+}
+refreshMarket();
+setInterval(refreshMarket, CFG.rateRefreshMs).unref();
+
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+function serveStatic(pathname, res) {
+  let file = path.normalize(path.join(STATIC_DIR, pathname));
+  if (!file.startsWith(STATIC_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    file = path.join(STATIC_DIR, 'index.html');
+  }
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     return sendJson(res, 200, { ok: true });
@@ -282,6 +337,10 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
+
+  if (SERVE_STATIC && !pathname.startsWith('/api/')) {
+    return serveStatic(pathname, res);
+  }
 
   try {
     // Health endpoints
@@ -292,11 +351,24 @@ const server = http.createServer(async (req, res) => {
         service: 'ce-vault-api-server',
         cycle: state.cycle,
         rate: state.rate,
+        rateMode: state.rateMode || 'manual',
+        marketRate: market.rate,
         pinnedBank: state.pinnedBank.code,
         txCount: state.transactions.length,
         usedPercent: summary.usedPercent,
         timestamp: new Date().toISOString(),
       });
+    }
+
+    // Auto-configuration status (never exposes secret values)
+    if (req.method === 'GET' && pathname === '/api/config') {
+      return sendJson(res, 200, { ok: true, ...publicConfig(CFG), rateMode: state.rateMode || 'manual' });
+    }
+
+    // Live market rate
+    if (req.method === 'GET' && pathname === '/api/market') {
+      if (url.searchParams.get('refresh') === '1') await refreshMarket();
+      return sendJson(res, 200, { ok: true, ...market, deskRate: state.rate, rateMode: state.rateMode || 'manual', spread: CFG.rateSpread });
     }
 
     // Main vault state endpoint
@@ -377,6 +449,7 @@ const server = http.createServer(async (req, res) => {
 
       state.transactions.unshift(newTx);
       saveState(state);
+      sendTelegram(CFG, `◈ CE · NEW SLIP (${newTx.status})\n🆔 ${newTx.id}\n📥 ${thb.toLocaleString()} THB\n💎 ${usdtExpected} USDT\n🏦 ${bank} · ${account}\n${notes}`);
 
       return sendJson(res, 201, {
         ok: true,
@@ -521,20 +594,29 @@ const server = http.createServer(async (req, res) => {
     // Update Desk Rate
     if (req.method === 'POST' && pathname === '/api/dashboard/rate') {
       const body = await parseJsonBody(req);
+      if (body.auto) {
+        state.rateMode = 'auto';
+        await refreshMarket();
+        if (market.rate) state.rate = Number((market.rate + CFG.rateSpread).toFixed(2));
+        saveState(state);
+        return sendJson(res, 200, { ok: true, rate: state.rate, rateMode: 'auto', summary: computeSummary(state) });
+      }
       const nextRate = Number(body.rate);
       if (isNaN(nextRate) || nextRate <= 0) {
         return sendJson(res, 400, { ok: false, error: 'invalid_rate' });
       }
       state.rate = Number(nextRate.toFixed(4));
+      state.rateMode = 'manual';
       if (body.marketRate) {
         state.marketRate = Number(Number(body.marketRate).toFixed(4));
-      } else {
-        state.marketRate = Number((state.rate - 0.35).toFixed(4));
+      } else if (!market.rate) {
+        state.marketRate = Number((state.rate - CFG.rateSpread).toFixed(4));
       }
       saveState(state);
       return sendJson(res, 200, {
         ok: true,
         rate: state.rate,
+        rateMode: 'manual',
         summary: computeSummary(state),
       });
     }
@@ -567,6 +649,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       saveState(state);
+      sendTelegram(CFG, `◈ CE · NEW CYCLE\n${oldCycle} → ${newCycle}\n📥 ${summary.receivedThb.toLocaleString()} THB\n📤 ${summary.sentUsdt} USDT`);
       return sendJson(res, 200, {
         ok: true,
         oldCycle,
@@ -580,6 +663,7 @@ const server = http.createServer(async (req, res) => {
     // Reset demo data
     if (req.method === 'POST' && pathname === '/api/dashboard/reset-demo') {
       state = structuredClone(DEFAULT_STATE);
+      await refreshMarket();
       saveState(state);
       return sendJson(res, 200, {
         ok: true,

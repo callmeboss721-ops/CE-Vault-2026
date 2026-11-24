@@ -29,6 +29,7 @@ const requiredFiles = [
   'artifacts/ce-vault/src/components/ui/index.ts',
   'artifacts/ce-vault/src/constants/messages.ts',
   'artifacts/api-server/src/server.mjs',
+  'artifacts/api-server/src/autoconfig.mjs',
 ];
 
 for (const rel of requiredFiles) {

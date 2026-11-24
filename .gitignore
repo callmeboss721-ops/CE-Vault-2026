@@ -55,3 +55,6 @@ Thumbs.db
 # of the shipped app. See CLEANUP_REPORT.md for why this was removed.
 attached_assets/
 .migration-backup/
+
+# CE Vault runtime data (auto-generated secrets + state)
+artifacts/api-server/data/
