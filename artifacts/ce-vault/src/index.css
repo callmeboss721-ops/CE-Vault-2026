@@ -1,0 +1,342 @@
+@layer theme, base, components, utilities;
+@import "@workspace/ce-empire-command-system/styles.css";
+
+:root {
+  /* CE Vault UI primitives. Keep these aliases local to the consuming app;
+     shared CE Empire tokens remain the source for existing components. */
+  --b0: #061020;
+  --b1: #0a1223;
+  --b2: #0a1628;
+  --b3: #0d1c31;
+  --b4: #132540;
+  --c: #3fe0ff;
+  --ca: rgba(63, 224, 255, 0.12);
+  --cb: rgba(63, 224, 255, 0.25);
+  --cc: rgba(63, 224, 255, 0.4);
+  --g: #d4af37;
+  --ga: rgba(212, 175, 55, 0.12);
+  --gb: rgba(212, 175, 55, 0.32);
+  --s: #44d895;
+  --sa: rgba(68, 216, 149, 0.12);
+  --sb: rgba(68, 216, 149, 0.32);
+  --d: #b33a4d;
+  --da: rgba(179, 58, 77, 0.12);
+  --db: rgba(179, 58, 77, 0.32);
+  --w: #f0d77b;
+  --wa: rgba(240, 215, 123, 0.12);
+  --wb: rgba(240, 215, 123, 0.32);
+  --al: #f06e86;
+  --ala: rgba(240, 110, 134, 0.12);
+  --alb: rgba(240, 110, 134, 0.32);
+  --t1: #f4f7fa;
+  --t2: rgba(244, 247, 250, 0.6);
+  --t3: rgba(244, 247, 250, 0.32);
+  --br: rgba(23, 48, 74, 0.72);
+  --bra: rgba(63, 224, 255, 0.4);
+
+  /* Product-facing aliases for the CE Vault theme. Values resolve from the
+     shared design-system tokens so this artifact has one visual source of truth. */
+  --color-background: hsl(var(--background));
+  --color-surface: hsl(var(--card));
+  --color-surface-muted: hsl(var(--muted));
+  --color-foreground: hsl(var(--foreground));
+  --color-foreground-muted: hsl(var(--muted-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-border: hsl(var(--border));
+  --font-heading: var(--app-font-sans);
+  --text-display: clamp(2.5rem, 7vw, 5.5rem);
+  --text-base: 15px;
+  --text-small: 11px;
+  --font-weight-heading: 800;
+  --font-weight-body: 400;
+  --leading-theme: 1.5;
+  --tracking-theme: 0.01em;
+  --spacing-xs: var(--spacing);
+  --spacing-sm: calc(var(--spacing) * 2);
+  --spacing-md: calc(var(--spacing) * 3);
+  --spacing-lg: calc(var(--spacing) * 5);
+  --spacing-xl: calc(var(--spacing) * 8);
+  --spacing-2xl: calc(var(--spacing) * 14);
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+  --shadow-sm: 0 0 12px rgba(63, 224, 255, 0.12);
+  --shadow-md: 0 0 28px rgba(63, 224, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 0 60px rgba(63, 224, 255, 0.2), 0 18px 50px rgba(0, 0, 0, 0.45);
+  --bg: hsl(var(--background));
+  --bg-subtle: hsl(var(--secondary) / 0.07);
+  --fg: hsl(var(--foreground));
+  --fg-muted: hsl(var(--muted-foreground));
+  --line: hsl(var(--border) / 0.72);
+  --gold: hsl(var(--primary));
+  --cyan: hsl(var(--secondary));
+  --success: hsl(var(--chart-3));
+  --danger: hsl(var(--destructive));
+  --font-body: var(--app-font-sans);
+  --font-display: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+  --ce-surface: hsl(var(--card));
+  --ce-surface-raised: hsl(var(--card) / 0.78);
+  --ce-border: hsl(var(--border) / 0.86);
+  --ce-cyan: hsl(var(--secondary));
+  --ce-gold: hsl(var(--primary));
+  --ce-green: hsl(var(--chart-3));
+  --ce-amber: hsl(var(--accent));
+  --ce-red: hsl(var(--destructive));
+  --ce-top-glow: var(--shadow-md);
+}
+
+/* CE Vault consumes the Empire theme as a dark operator surface. The product
+   stays quiet by default; gold is reserved for money and cyan for live work. */
+html {
+  background: var(--bg);
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  color: var(--t1);
+  background: var(--b0);
+  font-family: "Space Grotesk", var(--font-body), sans-serif;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+.mono {
+  font-family: "Space Mono", var(--app-font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+::selection {
+  color: hsl(var(--primary-foreground));
+  background: var(--cyan);
+}
+
+.bank-logo {
+  display: block;
+  flex: none;
+  border-radius: 28%;
+  object-fit: contain;
+  box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ce-status-pulse {
+    animation: ce-status-pulse 1.5s ease-in-out infinite;
+  }
+}
+
+@keyframes ce-status-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.ce-landing {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 78% 8%,
+      hsl(var(--primary) / 0.09),
+      transparent 28rem
+    ),
+    hsl(var(--background));
+}
+
+.ce-landing::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.42;
+  background-image:
+    linear-gradient(hsl(var(--border) / 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--border) / 0.18) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+}
+
+.ce-landing__shell {
+  position: relative;
+  z-index: 1;
+}
+
+.ce-landing__brand {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.ce-landing__lockup {
+  display: block;
+  width: min(220px, 58vw);
+  height: auto;
+  max-height: 58px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.ce-landing__product {
+  color: hsl(var(--muted-foreground));
+  font-family: var(--app-font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.ce-landing__system {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--app-font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ce-landing__system .bg-chart-3 {
+  box-shadow: 0 0 12px hsl(var(--chart-3) / 0.8);
+}
+
+.ce-landing__card {
+  border-color: hsl(var(--border) / 0.82);
+  box-shadow: 0 24px 70px hsl(var(--background) / 0.3);
+}
+
+.ce-landing__hero-art {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1.34;
+  border-bottom: 1px solid hsl(var(--border) / 0.82);
+  background: hsl(var(--popover));
+}
+
+.ce-landing__hero-art::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(180deg, transparent 42%, hsl(var(--popover) / 0.92) 100%),
+    linear-gradient(90deg, hsl(var(--popover) / 0.2), transparent 52%);
+}
+
+.ce-landing__hero-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.82;
+}
+
+.ce-landing__hero-art-label {
+  position: absolute;
+  right: 1.25rem;
+  bottom: 1rem;
+  left: 1.25rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: hsl(var(--foreground) / 0.74);
+  font-family: var(--app-font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.ce-landing__hero-art-label span:first-child {
+  color: hsl(var(--accent));
+}
+
+.ce-landing__hero-art-label span:last-child {
+  color: hsl(var(--primary));
+  white-space: nowrap;
+}
+
+.ce-landing__workflow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.ce-landing__workflow span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ce-landing__workflow span.is-active {
+  color: hsl(var(--primary));
+}
+
+.ce-landing__workflow i {
+  display: inline-block;
+  width: 18px;
+  height: 1px;
+  background: hsl(var(--border));
+}

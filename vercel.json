@@ -1,0 +1,8 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @workspace/ce-vault run build",
+  "outputDirectory": "artifacts/ce-vault/dist/public",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
