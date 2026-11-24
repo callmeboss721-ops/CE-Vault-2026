@@ -335,3 +335,30 @@ export async function sendTelegram(cfg, text, event = 'notification') {
   const res = await sendTelegramDetailed(cfg, text, { event });
   return res.ok;
 }
+
+export async function pinTelegramMessage(cfg, messageId, { overrideToken, overrideChatId, disableNotification = false } = {}) {
+  const token = String(overrideToken || cfg.integrations.telegram.token || '').trim();
+  const chatId = String(overrideChatId || cfg.integrations.telegram.chatId || '').trim();
+  if (!token || !chatId || !messageId) {
+    return { ok: false, description: 'ข้อมูลไม่ครบสำหรับปักหมุด (Missing token, chatId, or messageId)' };
+  }
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/pinChatMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: Number(messageId),
+        disable_notification: Boolean(disableNotification),
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) {
+      return { ok: false, status: r.status, description: j.description || `HTTP ${r.status}` };
+    }
+    return { ok: true, messageId: Number(messageId) };
+  } catch (err) {
+    return { ok: false, description: String(err?.message || err) };
+  }
+}

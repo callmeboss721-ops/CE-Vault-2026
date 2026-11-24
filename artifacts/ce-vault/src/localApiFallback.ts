@@ -1,5 +1,11 @@
 // Transparent client-side API & real Telegram Bot engine for static hosts (e.g., GitHub Pages).
 // Supports connecting to a custom Backend API URL OR running standalone in-browser with real api.telegram.org calls.
+import {
+  parseSmartPinText,
+  formatSmartPinCard,
+  formatCeTransactionCard,
+  formatThaiSlipDateTime,
+} from './utils/smartPin';
 
 const STORAGE_KEY = 'ce_vault_state_v1';
 const SETTINGS_KEY = 'ce_vault_settings_v1';
@@ -93,6 +99,8 @@ const DEFAULT_STATE = {
       settlements: [] as Array<{ id: string; usdt: number; time: string }>,
       notes: 'OCR ✓, Bank Match ✓, Limit ✓',
       overrideReason: undefined as string | undefined,
+      slipDate: undefined as string | undefined,
+      dateMismatch: false as boolean | undefined,
     },
     {
       id: '#CE-2026-A044',
@@ -738,10 +746,14 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     const sender = String(body.sender || 'นาย สมชาย ใจดี');
     const confidence = Number(body.confidence ?? 98.7);
     const forceDuplicate = Boolean(body.forceDuplicate);
+    const slipDate = String(body.slipDate || formatThaiSlipDateTime()).trim();
+    const todayThaiDate = formatThaiSlipDateTime().split(' ')[0];
+    const slipDatePart = slipDate.split(' ')[0];
+    const dateMismatch = Boolean(body.dateMismatch) || (Boolean(slipDatePart) && slipDatePart !== todayThaiDate);
 
     const summary = computeSummary(state);
     const usdtExpected = Number((thb / state.rate).toFixed(2));
-    const fingerprint = String(body.fingerprint || `FP-${thb}-${bank}-${sender}`);
+    const fingerprint = String(body.fingerprint || `FP-${thb}-${bank}-${sender}-${slipDate}`);
 
     const existing = state.transactions.find((t) => t.fingerprint === fingerprint);
     if (forceDuplicate || existing) {
@@ -764,7 +776,10 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
 
     let status = 'READY';
     let notes = 'OCR ✓, Bank Match ✓, Limit ✓';
-    if (confidence < 80) {
+    if (dateMismatch) {
+      status = 'REVIEW';
+      notes = `วันที่สลิปไม่ตรง (${slipDate}) — เวลาไม่ตรงกับปัจจุบัน (Slip Date Mismatch)`;
+    } else if (confidence < 80) {
       status = 'REVIEW';
       notes = `ความแม่นยำ OCR ต่ำ (${confidence}% · Low Confidence) — รอตรวจสอบ (Review Required)`;
     } else if (!bankMatchesPin) {
@@ -786,6 +801,8 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
       account,
       sender,
       time: nowHHMM(),
+      slipDate,
+      dateMismatch,
       status,
       confidence,
       fingerprint,
@@ -797,12 +814,46 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     state.transactions.unshift(newTx);
     saveState(state);
 
-    const shouldNotify = status === 'MISMATCH' ? settings.notifyEvents.onMismatch : settings.notifyEvents.onScan;
+    const shouldNotify = status === 'MISMATCH' || dateMismatch ? settings.notifyEvents.onMismatch : settings.notifyEvents.onScan;
     if (tgEnabled && shouldNotify) {
-      void browserSendTelegram(
-        `◈ CE · NEW SLIP (รับสลิปใหม่ · ${newTx.status})\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${newTx.id}\n📥 ยอดรับ (Amount): ${thb.toLocaleString()} THB\n💎 ยอดโอน (USDT): ${usdtExpected} USDT\n🏦 บัญชี (Bank): ${bank} · ${account}\n👤 ผู้โอน (Sender): ${sender}\nℹ️ ${notes}`,
-        status === 'MISMATCH' ? 'mismatch-alert' : 'slip-scan'
-      );
+      const cardText = dateMismatch
+        ? formatCeTransactionCard({
+            statusLine: '🔴 วันที่สลิปไม่ตรง (Slip Date Mismatch)',
+            thb,
+            rate: state.rate,
+            usdtExpected,
+            usdtSent: 0,
+            bank,
+            account,
+            slipTime: slipDate,
+            blocked: true,
+            alertLine: 'เวลาไม่ตรงกับปัจจุบัน',
+          })
+        : status === 'MISMATCH'
+        ? formatCeTransactionCard({
+            statusLine: '🟠 บัญชีสลิปไม่ตรง PIN (Bank Mismatch)',
+            thb,
+            rate: state.rate,
+            usdtExpected,
+            usdtSent: 0,
+            bank,
+            account,
+            slipTime: slipDate,
+            blocked: true,
+            alertLine: `บัญชีไม่ตรงกับ PIN วันนี้ (${state.pinnedBank.code})`,
+          })
+        : formatCeTransactionCard({
+            statusLine: status === 'REVIEW' ? `🟡 รอตรวจสอบสลิป (REVIEW · OCR ${confidence}%)` : '🟡 พร้อมยืนยันโอน (READY)',
+            thb,
+            rate: state.rate,
+            usdtExpected,
+            usdtSent: 0,
+            bank,
+            account,
+            slipTime: slipDate,
+            blocked: status === 'REVIEW',
+          });
+      void browserSendTelegram(cardText, dateMismatch ? 'date-mismatch' : status === 'MISMATCH' ? 'mismatch-alert' : 'slip-scan');
     }
 
     return jsonRes(201, { ok: true, tx: newTx, summary: computeSummary(state), transactions: state.transactions });
@@ -817,6 +868,7 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
 
     if (action === 'confirm') {
       tx.status = body.toPending ? 'PENDING' : 'READY';
+      tx.dateMismatch = false;
       tx.notes = body.toPending
         ? 'เข้าคิวรอโอน USDT (Queued · PENDING)'
         : 'ยืนยันสลิปแล้ว พร้อมโอน USDT (Confirmed · READY)';
@@ -826,11 +878,22 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     } else if (action === 'override') {
       const reason = String(body.reason || 'ยืนยันโดยเจ้าหน้าที่ (Approved by Operator)').trim();
       tx.status = 'READY';
+      tx.dateMismatch = false;
       tx.overrideReason = reason;
       tx.notes = `⚡ อนุมัติพิเศษ (OVERRIDE): ${reason}`;
       if (tgEnabled && settings.notifyEvents.onMismatch) {
         void browserSendTelegram(
-          `◈ CE · OVERRIDE ⚡ (อนุมัติกรณีพิเศษ)\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📥 ยอดรับ (Amount): ${tx.thb.toLocaleString()} THB\n💎 ยอดโอน (USDT): ${tx.usdtExpected} USDT\n📝 เหตุผล (Reason): ${reason}\n🟡 สถานะ: พร้อมโอน (READY)`,
+          formatCeTransactionCard({
+            statusLine: '⚡ อนุมัติพิเศษพร้อมโอน (OVERRIDE · READY)',
+            thb: tx.thb,
+            rate: tx.rate,
+            usdtExpected: tx.usdtExpected,
+            usdtSent: tx.usdtSent,
+            bank: tx.bank,
+            account: tx.account,
+            slipTime: tx.slipDate || formatThaiSlipDateTime(),
+            alertLine: reason,
+          }),
           'override'
         );
       }
@@ -886,7 +949,17 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
       }
       if (tgEnabled && settings.notifyEvents.onSettle) {
         void browserSendTelegram(
-          `◈ CE · ${tx.status === 'SETTLED' ? 'DONE ✓ (โอนครบสำเร็จ)' : `${tx.status} (อัปเดตยอดโอน)`}\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📥 ยอดรับ (THB In): ${tx.thb.toLocaleString()} THB\n📤 โอนรวม (USDT Sent): ${tx.usdtSent} / ${tx.usdtExpected} USDT\n💱 เรท (Rate): ${tx.rate} THB`,
+          formatCeTransactionCard({
+            statusLine: tx.status === 'SETTLED' ? '🟢 โอนเหรียญครบแล้ว (SETTLED)' : '🔴 ส่งเหรียญไม่ครบ (SHORT)',
+            thb: tx.thb,
+            rate: tx.rate,
+            usdtExpected: tx.usdtExpected,
+            usdtSent: tx.usdtSent,
+            bank: tx.bank,
+            account: tx.account,
+            slipTime: tx.slipDate || formatThaiSlipDateTime(),
+            alertLine: tx.status === 'SHORT' ? `ยอดส่งขาด ${diff.toFixed(2)} USDT · รอส่งเพิ่ม` : '',
+          }),
           tx.status === 'SETTLED' ? 'settled' : 'short-settle'
         );
       }
@@ -898,6 +971,69 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     return jsonRes(200, { ok: true, tx, summary: computeSummary(state), transactions: state.transactions });
   }
 
+  if (method === 'POST' && pathname === '/api/dashboard/smart-pin') {
+    const rawText = String(body.rawText || '').trim();
+    const parsed = parseSmartPinText(rawText, state.limitThb);
+    if (!parsed) {
+      return jsonRes(400, {
+        ok: false,
+        error: 'parse_failed',
+        message: 'ไม่พบข้อมูลธนาคารหรือเลขบัญชีในข้อความ (เช่น: ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000)',
+      });
+    }
+    state.pinnedBank = {
+      code: parsed.code,
+      name: parsed.name,
+      account: parsed.account,
+      holder: parsed.holder,
+      updatedAt: `${nowHHMM()} น.`,
+    };
+    state.limitThb = parsed.limitThb;
+    const existingIdx = state.banks.findIndex(
+      (b) => String(b.code).toUpperCase() === parsed.code.toUpperCase() && b.account === parsed.account
+    );
+    if (existingIdx >= 0) {
+      state.banks[existingIdx] = { code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder };
+    } else {
+      state.banks.unshift({ code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder });
+    }
+    saveState(state);
+
+    let telegram: Awaited<ReturnType<typeof browserSendTelegram>> | null = null;
+    let pinned = false;
+    if (body.sendToTelegram !== false && tgEnabled) {
+      telegram = await browserSendTelegram(parsed.formattedMessage, 'smart-pin', undefined, body.chatId || undefined);
+      if (telegram.ok && 'messageId' in telegram && telegram.messageId && body.pinInTelegram !== false) {
+        try {
+          const pinRes = await origFetch(`https://api.telegram.org/bot${settings.botToken}/pinChatMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: body.chatId || settings.chatId,
+              message_id: telegram.messageId,
+              disable_notification: false,
+            }),
+          });
+          const pinJson = await pinRes.json().catch(() => ({}));
+          pinned = Boolean(pinRes.ok && pinJson.ok);
+        } catch {
+          pinned = false;
+        }
+      }
+    }
+
+    return jsonRes(200, {
+      ok: true,
+      parsed,
+      pinnedBank: state.pinnedBank,
+      banks: state.banks,
+      summary: computeSummary(state),
+      telegram,
+      pinned,
+      deliveryLog: settings.deliveryLog,
+    });
+  }
+
   if (method === 'POST' && pathname === '/api/dashboard/pin') {
     const found = state.banks.find((b) => String(b.code).toUpperCase() === String(body.code || '').toUpperCase());
     if (found) {
@@ -907,7 +1043,33 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
       state.limitThb = Number(body.limitThb);
     }
     saveState(state);
-    return jsonRes(200, { ok: true, pinnedBank: state.pinnedBank, summary: computeSummary(state) });
+
+    let telegram: Awaited<ReturnType<typeof browserSendTelegram>> | null = null;
+    let pinned = false;
+    if (body.sendToTelegram && tgEnabled) {
+      const formatted = formatSmartPinCard({
+        code: state.pinnedBank.code,
+        account: state.pinnedBank.account,
+        holder: state.pinnedBank.holder,
+        limitThb: state.limitThb,
+      });
+      telegram = await browserSendTelegram(formatted, 'smart-pin');
+      if (telegram.ok && 'messageId' in telegram && telegram.messageId && body.pinInTelegram !== false) {
+        try {
+          const pinRes = await origFetch(`https://api.telegram.org/bot${settings.botToken}/pinChatMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: settings.chatId, message_id: telegram.messageId }),
+          });
+          const pinJson = await pinRes.json().catch(() => ({}));
+          pinned = Boolean(pinRes.ok && pinJson.ok);
+        } catch {
+          pinned = false;
+        }
+      }
+    }
+
+    return jsonRes(200, { ok: true, pinnedBank: state.pinnedBank, summary: computeSummary(state), telegram, pinned });
   }
 
   if (method === 'POST' && pathname === '/api/dashboard/rate') {

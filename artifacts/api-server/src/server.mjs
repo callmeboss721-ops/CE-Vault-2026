@@ -12,7 +12,14 @@ import {
   detectTelegramChats,
   sendTelegramDetailed,
   sendTelegram,
+  pinTelegramMessage,
 } from './autoconfig.mjs';
+import {
+  parseSmartPinText,
+  formatSmartPinCard,
+  formatCeTransactionCard,
+  formatThaiSlipDateTime,
+} from './smartPin.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.CE_DATA_DIR || path.join(__dirname, '..', 'data');
@@ -521,10 +528,14 @@ const server = http.createServer(async (req, res) => {
       const sender = String(body.sender || 'นาย สมชาย ใจดี');
       const confidence = Number(body.confidence ?? 98.7);
       const forceDuplicate = Boolean(body.forceDuplicate);
+      const slipDate = String(body.slipDate || formatThaiSlipDateTime()).trim();
+      const todayThaiDate = formatThaiSlipDateTime().split(' ')[0];
+      const slipDatePart = slipDate.split(' ')[0];
+      const dateMismatch = Boolean(body.dateMismatch) || (Boolean(slipDatePart) && slipDatePart !== todayThaiDate);
 
       const summary = computeSummary(state);
       const usdtExpected = Number((thb / state.rate).toFixed(2));
-      const fingerprint = body.fingerprint || `FP-${thb}-${bank}-${sender}`;
+      const fingerprint = body.fingerprint || `FP-${thb}-${bank}-${sender}-${slipDate}`;
 
       // Check duplicate
       const existing = state.transactions.find((t) => t.fingerprint === fingerprint);
@@ -548,6 +559,9 @@ const server = http.createServer(async (req, res) => {
           error: 'ocr_failed',
           message: 'อ่านสลิปไม่สำเร็จ ความแม่นยำต่ำกว่า 60% (OCR Confidence < 60%)',
         });
+      } else if (dateMismatch) {
+        status = 'REVIEW';
+        notes = `วันที่สลิปไม่ตรง (${slipDate}) — เวลาไม่ตรงกับปัจจุบัน (Slip Date Mismatch)`;
       } else if (confidence < 80) {
         status = 'REVIEW';
         notes = `ความแม่นยำ OCR ต่ำ (${confidence}% · Low Confidence) — รอตรวจสอบ (Review Required)`;
@@ -570,6 +584,8 @@ const server = http.createServer(async (req, res) => {
         account,
         sender,
         time: nowHHMM(),
+        slipDate,
+        dateMismatch,
         status,
         confidence,
         fingerprint,
@@ -580,12 +596,62 @@ const server = http.createServer(async (req, res) => {
       state.transactions.unshift(newTx);
       saveState(state);
       const shouldNotify =
-        status === 'MISMATCH' ? CFG.notifyEvents.onMismatch : CFG.notifyEvents.onScan;
+        status === 'MISMATCH' || dateMismatch ? CFG.notifyEvents.onMismatch : CFG.notifyEvents.onScan;
       if (shouldNotify) {
+        const cardText = dateMismatch
+          ? formatCeTransactionCard({
+              statusLine: '🔴 วันที่สลิปไม่ตรง (Slip Date Mismatch)',
+              thb,
+              rate: state.rate,
+              usdtExpected,
+              usdtSent: 0,
+              bank,
+              account,
+              slipTime: slipDate,
+              blocked: true,
+              alertLine: 'เวลาไม่ตรงกับปัจจุบัน',
+            })
+          : status === 'MISMATCH'
+          ? formatCeTransactionCard({
+              statusLine: '🟠 บัญชีสลิปไม่ตรง PIN (Bank Mismatch)',
+              thb,
+              rate: state.rate,
+              usdtExpected,
+              usdtSent: 0,
+              bank,
+              account,
+              slipTime: slipDate,
+              blocked: true,
+              alertLine: `บัญชีไม่ตรงกับ PIN วันนี้ (${state.pinnedBank.code})`,
+            })
+          : status === 'REVIEW'
+          ? formatCeTransactionCard({
+              statusLine: `🟡 รอตรวจสอบสลิป (REVIEW · OCR ${confidence}%)`,
+              thb,
+              rate: state.rate,
+              usdtExpected,
+              usdtSent: 0,
+              bank,
+              account,
+              slipTime: slipDate,
+              blocked: true,
+              alertLine: 'กรุณาตรวจสอบสลิปก่อนยืนยัน',
+            })
+          : formatCeTransactionCard({
+              statusLine: '🟡 พร้อมยืนยันโอน (READY)',
+              thb,
+              rate: state.rate,
+              usdtExpected,
+              usdtSent: 0,
+              bank,
+              account,
+              slipTime: slipDate,
+              blocked: false,
+            });
         sendTelegram(
           CFG,
-          `◈ CE · NEW SLIP (รับสลิปใหม่ · ${newTx.status})\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${newTx.id}\n📥 ยอดรับ (Amount): ${thb.toLocaleString()} THB\n💎 ยอดโอน (USDT): ${usdtExpected} USDT\n🏦 บัญชี (Bank): ${bank} · ${account}\n👤 ผู้โอน (Sender): ${sender}\nℹ️ ${notes}`,
-          status === 'MISMATCH' ? 'mismatch-alert' : 'slip-scan'
+          cardText,
+          dateMismatch ? 'date-mismatch' : status === 'MISMATCH' ? 'mismatch-alert' : 'slip-scan'
         );
       }
 
@@ -610,6 +676,7 @@ const server = http.createServer(async (req, res) => {
 
       if (action === 'confirm') {
         tx.status = body.toPending ? 'PENDING' : 'READY';
+        tx.dateMismatch = false;
         tx.notes = body.toPending
           ? 'เข้าคิวรอโอน USDT (Queued · PENDING)'
           : 'ยืนยันสลิปแล้ว พร้อมโอน USDT (Confirmed · READY)';
@@ -619,12 +686,23 @@ const server = http.createServer(async (req, res) => {
       } else if (action === 'override') {
         const reason = String(body.reason || 'ยืนยันโดยเจ้าหน้าที่ (Approved by Operator)').trim();
         tx.status = 'READY';
+        tx.dateMismatch = false;
         tx.overrideReason = reason;
         tx.notes = `⚡ อนุมัติพิเศษ (OVERRIDE): ${reason}`;
         if (CFG.notifyEvents.onMismatch) {
           sendTelegram(
             CFG,
-            `◈ CE · OVERRIDE ⚡ (อนุมัติกรณีพิเศษ)\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📥 ยอดรับ (Amount): ${tx.thb.toLocaleString()} THB\n💎 ยอดโอน (USDT): ${tx.usdtExpected} USDT\n📝 เหตุผล (Reason): ${reason}\n🟡 สถานะ: พร้อมโอน (READY)`,
+            formatCeTransactionCard({
+              statusLine: '⚡ อนุมัติพิเศษพร้อมโอน (OVERRIDE · READY)',
+              thb: tx.thb,
+              rate: tx.rate,
+              usdtExpected: tx.usdtExpected,
+              usdtSent: tx.usdtSent,
+              bank: tx.bank,
+              account: tx.account,
+              slipTime: tx.slipDate || formatThaiSlipDateTime(),
+              alertLine: reason,
+            }),
             'override'
           );
         }
@@ -675,7 +753,17 @@ const server = http.createServer(async (req, res) => {
         if (CFG.notifyEvents.onSettle) {
           sendTelegram(
             CFG,
-            `◈ CE · ${tx.status === 'SETTLED' ? 'DONE ✓ (โอนครบสำเร็จ)' : 'SHORT 🔴 (ยอดส่งขาด)'}\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📥 ยอดรับ (THB In): ${tx.thb.toLocaleString()} THB\n📤 โอนรวม (USDT Sent): ${tx.usdtSent} / ${tx.usdtExpected} USDT\n💱 เรท (Rate): ${tx.rate} THB`,
+            formatCeTransactionCard({
+              statusLine: tx.status === 'SETTLED' ? '🟢 โอนเหรียญครบแล้ว (SETTLED)' : '🔴 ส่งเหรียญไม่ครบ (SHORT)',
+              thb: tx.thb,
+              rate: tx.rate,
+              usdtExpected: tx.usdtExpected,
+              usdtSent: tx.usdtSent,
+              bank: tx.bank,
+              account: tx.account,
+              slipTime: tx.slipDate || formatThaiSlipDateTime(),
+              alertLine: tx.status === 'SHORT' ? `ยอดส่งขาด ${diff.toFixed(2)} USDT · รอส่งเพิ่ม` : '',
+            }),
             tx.status === 'SETTLED' ? 'settled' : 'short-settle'
           );
         }
@@ -709,7 +797,16 @@ const server = http.createServer(async (req, res) => {
         if (CFG.notifyEvents.onSettle) {
           sendTelegram(
             CFG,
-            `◈ CE · SHORT RECOVERY (${tx.status})\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📤 ส่งเพิ่ม (Top-up): +${sendMore.toFixed(2)} USDT\n💎 ยอดส่งรวม (Total Sent): ${tx.usdtSent} / ${tx.usdtExpected} USDT`,
+            formatCeTransactionCard({
+              statusLine: tx.status === 'SETTLED' ? '🟢 โอนชดเชยครบแล้ว (SHORT → SETTLED)' : '🔵 โอนเพิ่มบางส่วน (PENDING)',
+              thb: tx.thb,
+              rate: tx.rate,
+              usdtExpected: tx.usdtExpected,
+              usdtSent: tx.usdtSent,
+              bank: tx.bank,
+              account: tx.account,
+              slipTime: tx.slipDate || formatThaiSlipDateTime(),
+            }),
             'short-recovery'
           );
         }
@@ -724,6 +821,103 @@ const server = http.createServer(async (req, res) => {
         summary: computeSummary(state),
         transactions: state.transactions,
       });
+    }
+
+    // Smart PIN Auto-Parser + Formatter + Auto-Pin in Telegram
+    if (req.method === 'POST' && pathname === '/api/dashboard/smart-pin') {
+      const body = await parseJsonBody(req);
+      const rawText = String(body.rawText || '').trim();
+      const parsed = parseSmartPinText(rawText, state.limitThb);
+      if (!parsed) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'parse_failed',
+          message: 'ไม่พบข้อมูลธนาคารหรือเลขบัญชีในข้อความ (เช่น: ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000)',
+        });
+      }
+
+      const newPinned = {
+        code: parsed.code,
+        name: parsed.name,
+        account: parsed.account,
+        holder: parsed.holder,
+        updatedAt: `${nowHHMM()} น.`,
+      };
+      state.pinnedBank = newPinned;
+      state.limitThb = parsed.limitThb;
+
+      // Upsert into state.banks so it's selectable everywhere
+      const existingIdx = state.banks.findIndex(
+        (b) => String(b.code).toUpperCase() === parsed.code.toUpperCase() && b.account === parsed.account
+      );
+      if (existingIdx >= 0) {
+        state.banks[existingIdx] = { code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder };
+      } else {
+        state.banks.unshift({ code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder });
+      }
+      saveState(state);
+
+      let telegram = null;
+      let pinResult = null;
+      if (body.sendToTelegram !== false && CFG.integrations.telegram.enabled) {
+        telegram = await sendTelegramDetailed(CFG, parsed.formattedMessage, {
+          event: 'smart-pin',
+          overrideChatId: body.chatId || undefined,
+        });
+        if (telegram.ok && telegram.messageId && body.pinInTelegram !== false) {
+          pinResult = await pinTelegramMessage(CFG, telegram.messageId, {
+            overrideChatId: body.chatId || undefined,
+          });
+        }
+      }
+
+      return sendJson(res, 200, {
+        ok: true,
+        parsed,
+        pinnedBank: state.pinnedBank,
+        banks: state.banks,
+        summary: computeSummary(state),
+        telegram,
+        pinned: Boolean(pinResult?.ok),
+        pinDetail: pinResult,
+        deliveryLog: CFG.deliveryLog || [],
+      });
+    }
+
+    // Telegram Webhook handler (auto-formats & re-pins whenever a user pins a raw bank message in Telegram)
+    if (req.method === 'POST' && pathname === '/api/telegram/webhook') {
+      const update = await parseJsonBody(req);
+      const msg = update?.message || update?.channel_post;
+      const chatId = msg?.chat?.id ? String(msg.chat.id) : null;
+      const pinnedRaw = msg?.pinned_message?.text || msg?.pinned_message?.caption || '';
+      const cmdText = typeof msg?.text === 'string' && msg.text.startsWith('/pin ') ? msg.text.slice(5).trim() : '';
+      const sourceText = pinnedRaw && !pinnedRaw.includes('◈ CE EMPIRE · ข้อมูลบัญชีรับเงิน') ? pinnedRaw : cmdText;
+
+      if (chatId && sourceText) {
+        const parsed = parseSmartPinText(sourceText, state.limitThb);
+        if (parsed) {
+          state.pinnedBank = {
+            code: parsed.code,
+            name: parsed.name,
+            account: parsed.account,
+            holder: parsed.holder,
+            updatedAt: `${nowHHMM()} น.`,
+          };
+          state.limitThb = parsed.limitThb;
+          saveState(state);
+
+          const sent = await sendTelegramDetailed(CFG, parsed.formattedMessage, {
+            event: 'webhook-smart-pin',
+            overrideChatId: chatId,
+          });
+          let pinRes = null;
+          if (sent.ok && sent.messageId) {
+            pinRes = await pinTelegramMessage(CFG, sent.messageId, { overrideChatId: chatId });
+          }
+          return sendJson(res, 200, { ok: true, handled: 'smart-pin', parsed, sent, pinned: Boolean(pinRes?.ok) });
+        }
+      }
+      return sendJson(res, 200, { ok: true, handled: 'ignored' });
     }
 
     // Update pinned bank account
@@ -745,10 +939,28 @@ const server = http.createServer(async (req, res) => {
         state.limitThb = Number(body.limitThb);
       }
       saveState(state);
+
+      let telegram = null;
+      let pinResult = null;
+      if (body.sendToTelegram && CFG.integrations.telegram.enabled) {
+        const formatted = formatSmartPinCard({
+          code: state.pinnedBank.code,
+          account: state.pinnedBank.account,
+          holder: state.pinnedBank.holder,
+          limitThb: state.limitThb,
+        });
+        telegram = await sendTelegramDetailed(CFG, formatted, { event: 'smart-pin' });
+        if (telegram.ok && telegram.messageId && body.pinInTelegram !== false) {
+          pinResult = await pinTelegramMessage(CFG, telegram.messageId);
+        }
+      }
+
       return sendJson(res, 200, {
         ok: true,
         pinnedBank: state.pinnedBank,
         summary: computeSummary(state),
+        telegram,
+        pinned: Boolean(pinResult?.ok),
       });
     }
 

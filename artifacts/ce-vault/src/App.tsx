@@ -9,6 +9,7 @@ import {
   TxItem,
 } from './components/ui';
 import { MSG } from './constants/messages';
+import { parseSmartPinText, formatThaiSlipDateTime } from './utils/smartPin';
 
 interface SettlementEntry {
   id: string;
@@ -26,6 +27,8 @@ interface Transaction {
   account: string;
   sender: string;
   time: string;
+  slipDate?: string;
+  dateMismatch?: boolean;
   status: TxStatus;
   confidence: number;
   fingerprint?: string;
@@ -182,6 +185,7 @@ export default function App() {
   const [rateInput, setRateInput] = useState<string>('43.00');
   const [pinCodeInput, setPinCodeInput] = useState<string>('BBL');
   const [limitInput, setLimitInput] = useState<string>('500000');
+  const [smartPinInput, setSmartPinInput] = useState<string>('ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000');
 
   // Scan form states
   const [scanThb, setScanThb] = useState<string>('10000');
@@ -189,6 +193,7 @@ export default function App() {
   const [scanAccount, setScanAccount] = useState<string>('097-0-28xxx-x');
   const [scanSender, setScanSender] = useState<string>('นาย สมชาย ใจดี');
   const [scanConfidence, setScanConfidence] = useState<string>('98.7');
+  const [scanSlipDate, setScanSlipDate] = useState<string>(() => formatThaiSlipDateTime());
   const [scanResultMsg, setScanResultMsg] = useState<string>('');
 
   // Messages tab filter
@@ -321,6 +326,7 @@ export default function App() {
           account: scanAccount,
           sender: scanSender,
           confidence: Number(scanConfidence),
+          slipDate: scanSlipDate,
           forceDuplicate,
         }),
       });
@@ -339,7 +345,8 @@ export default function App() {
           id: data.originalTx.id,
           thb: fmtThb(data.originalTx.thb),
           usdt: fmtUsdt(data.originalTx.usdtExpected),
-          time: data.originalTx.time,
+          rate: data.originalTx.rate?.toFixed?.(2) || '43.00',
+          slip_time: data.originalTx.slipDate || data.originalTx.time,
         });
         setScanResultMsg(dupMsg);
         showToast(`⚠️ พบสลิปซ้ำในระบบ (Duplicate Slip: ${data.originalTx.id})`);
@@ -350,11 +357,24 @@ export default function App() {
       setSelectedTxId(tx.id);
       setPanelMode('tx');
 
-      if (tx.status === 'MISMATCH') {
+      if (tx.dateMismatch) {
         setScanResultMsg(
-          MSG.BANK_MISMATCH({
+          MSG.SLIP_DATE_MISMATCH({
+            thb: fmtThb(tx.thb),
+            rate: tx.rate.toFixed(2),
             bank: tx.bank,
             account: tx.account,
+            slip_time: tx.slipDate || scanSlipDate,
+          })
+        );
+      } else if (tx.status === 'MISMATCH') {
+        setScanResultMsg(
+          MSG.BANK_MISMATCH({
+            thb: fmtThb(tx.thb),
+            rate: tx.rate.toFixed(2),
+            bank: tx.bank,
+            account: tx.account,
+            slip_time: tx.slipDate || scanSlipDate,
           })
             .replace('[PIN_BANK]', data.summary.pinnedBank.code)
             .replace('[PIN_ACCOUNT]', data.summary.pinnedBank.account)
@@ -368,6 +388,7 @@ export default function App() {
             name: tx.sender,
             rate: tx.rate.toFixed(2),
             confidence: tx.confidence,
+            slip_time: tx.slipDate || scanSlipDate,
           })
         );
       } else {
@@ -380,11 +401,12 @@ export default function App() {
             name: tx.sender,
             rate: tx.rate.toFixed(2),
             confidence: tx.confidence,
+            slip_time: tx.slipDate || scanSlipDate,
           })
         );
       }
 
-      showToast(`✅ สร้างรายการสำเร็จ (Created ${tx.id} · ${tx.status})`);
+      showToast(`✅ สร้างรายการสำเร็จ (Created ${tx.id} · ${tx.dateMismatch ? 'DATE MISMATCH' : tx.status})`);
     } catch (e) {
       showToast(`❌ ประมวลผลสลิปล้มเหลว (Scan Failed): ${String(e)}`);
     } finally {
@@ -392,18 +414,69 @@ export default function App() {
     }
   }
 
-  async function handleUpdatePin() {
-    setLoadingAction('pin');
+  async function handleSmartPinSubmit(sendToTelegram: boolean, pinInTelegram = true) {
+    setLoadingAction(sendToTelegram ? 'smart-pin-tg' : 'smart-pin');
+    try {
+      const res = await fetch('/api/dashboard/smart-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawText: smartPinInput,
+          sendToTelegram,
+          pinInTelegram,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showToast(`❌ ${data.message || 'แปลงข้อมูลบัญชีไม่สำเร็จ (Smart PIN Parse Failed)'}`);
+        return;
+      }
+      setSummary(data.summary);
+      if (Array.isArray(data.banks)) setBanks(data.banks);
+      setPinCodeInput(data.pinnedBank.code);
+      setLimitInput(String(data.summary.limitThb));
+      if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
+
+      if (sendToTelegram && data.telegram?.ok) {
+        showToast(
+          data.pinned
+            ? `📌 จัดรูปแบบ + ส่งและปักหมุดเข้า Telegram สำเร็จ! (Message #${data.telegram.messageId} Pinned)`
+            : `📨 จัดรูปแบบ & ส่งเข้า Telegram สำเร็จ (Message #${data.telegram.messageId} · ยังไม่ได้ปักหมุดอัตโนมัติ: ${data.pinDetail?.description || 'ต้องให้บอทเป็นแอดมินกลุ่ม'})`
+        );
+      } else if (sendToTelegram && !tgConnected) {
+        showToast('📌 บันทึก PIN ในระบบแล้ว (ตั้งค่า Telegram Bot ในแท็บ Settings เพื่อส่งปักหมุดเข้ากลุ่มอัตโนมัติ)');
+      } else {
+        showToast(`📌 บันทึก Smart PIN สำเร็จ (${data.pinnedBank.code} · ${data.pinnedBank.account})`);
+      }
+    } catch (e) {
+      showToast(`❌ Smart PIN ล้มเหลว: ${String(e)}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
+  async function handleUpdatePin(sendToTelegram = false) {
+    setLoadingAction(sendToTelegram ? 'pin-tg' : 'pin');
     try {
       const res = await fetch('/api/dashboard/pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: pinCodeInput, limitThb: Number(limitInput) }),
+        body: JSON.stringify({
+          code: pinCodeInput,
+          limitThb: Number(limitInput),
+          sendToTelegram,
+          pinInTelegram: true,
+        }),
       });
       const data = await res.json();
       if (res.ok && data.ok) {
         setSummary(data.summary);
-        showToast(`📌 ปักหมุดบัญชีสำเร็จ (Pinned: ${data.pinnedBank.code} · ${data.pinnedBank.account})`);
+        fetchSettings();
+        showToast(
+          sendToTelegram && data.telegram?.ok
+            ? `📌 ปักหมุดบัญชีและส่งเข้า Telegram สำเร็จ (${data.pinned ? 'Pinned ✓' : 'Sent ✓'})`
+            : `📌 ปักหมุดบัญชีสำเร็จ (Pinned: ${data.pinnedBank.code} · ${data.pinnedBank.account})`
+        );
       }
     } finally {
       setLoadingAction(null);
@@ -668,15 +741,29 @@ export default function App() {
 
   function renderBotMessageForTx(tx: Transaction): string {
     if (!summary) return '';
+    const slipStamp = tx.slipDate || formatThaiSlipDateTime();
+    if (tx.dateMismatch) {
+      return MSG.SLIP_DATE_MISMATCH({
+        thb: fmtThb(tx.thb),
+        rate: tx.rate.toFixed(2),
+        bank: tx.bank,
+        account: tx.account,
+        slip_time: slipStamp,
+      });
+    }
     if (tx.status === 'READY') {
       return MSG.OCR_READY({
         thb: fmtThb(tx.thb),
         usdt: fmtUsdt(tx.usdtExpected),
+        usdt_expected: fmtUsdt(tx.usdtExpected),
+        usdt_sent: fmtUsdt(tx.usdtSent),
+        usdt_outstanding: fmtUsdt(Math.max(0, tx.usdtExpected - tx.usdtSent)),
         bank: tx.bank,
         account: tx.account,
         name: tx.sender,
         rate: tx.rate.toFixed(2),
         confidence: tx.confidence,
+        slip_time: slipStamp,
       });
     }
     if (tx.status === 'PENDING') {
@@ -684,7 +771,12 @@ export default function App() {
         id: tx.id,
         thb: fmtThb(tx.thb),
         usdt: fmtUsdt(tx.usdtExpected),
+        usdt_sent: fmtUsdt(tx.usdtSent),
+        usdt_outstanding: fmtUsdt(Math.max(0, tx.usdtExpected - tx.usdtSent)),
+        bank: tx.bank,
+        account: tx.account,
         rate: tx.rate.toFixed(2),
+        slip_time: slipStamp,
       });
     }
     if (tx.status === 'SETTLED') {
@@ -692,23 +784,34 @@ export default function App() {
         id: tx.id,
         thb: fmtThb(tx.thb),
         usdt: fmtUsdt(tx.usdtSent),
+        usdt_expected: fmtUsdt(tx.usdtExpected),
+        bank: tx.bank,
+        account: tx.account,
         rate: tx.rate.toFixed(2),
-        time: `${tx.time} น.`,
+        slip_time: slipStamp,
       });
     }
     if (tx.status === 'SHORT') {
       const shortAmt = Math.max(0, tx.usdtExpected - tx.usdtSent);
       return MSG.TX_SHORT({
         id: tx.id,
+        thb: fmtThb(tx.thb),
+        rate: tx.rate.toFixed(2),
+        bank: tx.bank,
+        account: tx.account,
         usdt_expected: fmtUsdt(tx.usdtExpected),
         usdt_sent: fmtUsdt(tx.usdtSent),
         usdt_short: fmtUsdt(shortAmt),
+        slip_time: slipStamp,
       });
     }
     if (tx.status === 'MISMATCH') {
       return MSG.BANK_MISMATCH({
+        thb: fmtThb(tx.thb),
+        rate: tx.rate.toFixed(2),
         bank: tx.bank,
         account: tx.account,
+        slip_time: slipStamp,
       })
         .replace('[PIN_BANK]', summary.pinnedBank.code)
         .replace('[PIN_ACCOUNT]', summary.pinnedBank.account);
@@ -721,6 +824,7 @@ export default function App() {
         name: tx.sender,
         rate: tx.rate.toFixed(2),
         confidence: tx.confidence,
+        slip_time: slipStamp,
       });
     }
     if (tx.status === 'REJECTED') {
@@ -742,6 +846,8 @@ export default function App() {
     return MSG.OCR_LOADING();
   }
 
+  const smartPinPreview = parseSmartPinText(smartPinInput, Number(limitInput) || summary?.limitThb || 500000);
+
   const filteredTransactions = transactions.filter((t) =>
     statusFilter === 'ALL' ? true : t.status === statusFilter
   );
@@ -749,25 +855,37 @@ export default function App() {
   const tgConnected = Boolean((hasSavedToken || botTokenInput.trim()) && chatIdInput.trim());
 
   const messageTemplatesList = [
+    {
+      key: 'PIN-01',
+      group: 'Verify · Checks',
+      title: 'ระบบ PIN อัจฉริยะ (Smart PIN Auto-Format Card)',
+      text: MSG.SMART_PIN_CARD({ bank: 'KBANK', account: '1230004444', name: 'ธิติ ทองมี', limit: '50,000' }),
+    },
+    {
+      key: 'MSG-00',
+      group: 'Verify · Checks',
+      title: 'วันที่สลิปไม่ตรงกับปัจจุบัน (Slip Date Mismatch)',
+      text: MSG.SLIP_DATE_MISMATCH({ thb: '5,000.00', rate: '44.00', bank: 'KTB', account: '••••1670', slip_time: '13/12/2569 19:39' }),
+    },
     { key: 'MSG-01', group: 'Intake · OCR', title: 'กำลังอ่านสลิป (Scanning Slip)', text: MSG.OCR_LOADING() },
     {
       key: 'MSG-02',
       group: 'Intake · OCR',
       title: 'อ่านสลิปสำเร็จ — พร้อมยืนยัน (OCR Ready)',
-      text: MSG.OCR_READY({ thb: '10,000.00', usdt: '232.56', bank: 'BBL', account: '097-0-28xxx-x', name: 'นาย สมชาย ใจดี', rate: '43.00', confidence: 98.7 }),
+      text: MSG.OCR_READY({ thb: '10,000.00', usdt: '232.56', bank: 'BBL', account: '097-0-28123-4', name: 'นาย สมชาย ใจดี', rate: '43.00', confidence: 98.7 }),
     },
     { key: 'MSG-03', group: 'Intake · OCR', title: 'อ่านสลิปล้มเหลว (OCR Failed)', text: MSG.OCR_FAIL() },
     {
       key: 'MSG-04',
       group: 'Intake · OCR',
       title: 'ความแม่นยำต่ำ — รอตรวจสอบ (Low Confidence Review)',
-      text: MSG.OCR_LOW_CONFIDENCE({ thb: '10,000.00', bank: 'BBL', account: '097-0-28xxx-x', name: 'นาย สม...ย ใจดี', rate: '43.00', confidence: 72 }),
+      text: MSG.OCR_LOW_CONFIDENCE({ thb: '10,000.00', bank: 'BBL', account: '097-0-28123-4', name: 'นาย สม...ย ใจดี', rate: '43.00', confidence: 72 }),
     },
     {
       key: 'MSG-05',
       group: 'Verify · Checks',
       title: 'บัญชีไม่ตรงกับ PIN (Bank Account Mismatch)',
-      text: MSG.BANK_MISMATCH({ bank: 'KTB', account: 'xxx-x-x7413-x' }).replace('[PIN_BANK]', summary?.pinnedBank.code || 'BBL').replace('[PIN_ACCOUNT]', summary?.pinnedBank.account || '097-0-28xxx-x'),
+      text: MSG.BANK_MISMATCH({ thb: '15,000.00', rate: '43.00', bank: 'KTB', account: 'xxx-x-x7413-x' }).replace('[PIN_BANK]', summary?.pinnedBank.code || 'BBL').replace('[PIN_ACCOUNT]', summary?.pinnedBank.account || '097-0-28xxx-x'),
     },
     {
       key: 'MSG-06',
@@ -1904,20 +2022,136 @@ export default function App() {
                   </>
                 )}
 
-                {/* MODE 3: BANK PIN MANAGER */}
+                {/* MODE 3: SMART BANK PIN MANAGER */}
                 {panelMode === 'pin' && summary && (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--g)' }}>
-                        📌 ปักหมุดบัญชีรับโอนหลัก (Today's Pinned Bank)
+                        📌 ระบบ PIN อัจฉริยะ (Smart Auto-Format PIN)
                       </div>
                       <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('tx')}>
                         ← กลับ (Back)
                       </CeButton>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+
+                    {/* Smart PIN Freeform Auto-Parser */}
+                    <div
+                      style={{
+                        background: 'var(--b3)',
+                        border: '1px solid var(--cb)',
+                        borderRadius: '10px',
+                        padding: '14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                      }}
+                    >
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--c)' }}>
+                        ✨ พิมพ์หรือวางข้อมูลบัญชีแบบอิสระ ระบบจัดรูปแบบให้อัตโนมัติ (Smart Auto-Format):
+                      </div>
+                      <textarea
+                        rows={2}
+                        placeholder="เช่น: ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000"
+                        value={smartPinInput}
+                        onChange={(e) => setSmartPinInput(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px',
+                          borderRadius: '8px',
+                          background: 'var(--b1)',
+                          border: '1px solid var(--br)',
+                          color: 'var(--t1)',
+                          fontSize: '12px',
+                          resize: 'vertical',
+                        }}
+                      />
+
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => setSmartPinInput('ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000')}
+                          style={{
+                            padding: '4px 9px',
+                            borderRadius: '6px',
+                            fontSize: '10px',
+                            cursor: 'pointer',
+                            background: 'var(--b2)',
+                            border: '1px solid var(--br)',
+                            color: 'var(--t2)',
+                          }}
+                        >
+                          ตัวอย่าง: กสิกร 50,000฿
+                        </button>
+                        <button
+                          onClick={() => setSmartPinInput('BBL 0970281670 บจก. ซีอี เอ็มไพร์ วงเงิน 500000')}
+                          style={{
+                            padding: '4px 9px',
+                            borderRadius: '6px',
+                            fontSize: '10px',
+                            cursor: 'pointer',
+                            background: 'var(--b2)',
+                            border: '1px solid var(--br)',
+                            color: 'var(--t2)',
+                          }}
+                        >
+                          ตัวอย่าง: กรุงเทพ 500,000฿
+                        </button>
+                      </div>
+
+                      {smartPinPreview ? (
+                        <div>
+                          <div style={{ fontSize: '10px', color: 'var(--s)', marginBottom: '4px', fontWeight: 700 }}>
+                            ✓ ตัวอย่างการ์ดที่บอทจัดรูปแบบอัตโนมัติ (Auto-Formatted Card Preview):
+                          </div>
+                          <pre
+                            style={{
+                              margin: 0,
+                              padding: '12px',
+                              borderRadius: '8px',
+                              background: 'var(--b0)',
+                              border: '1px solid var(--sb)',
+                              color: 'var(--t1)',
+                              fontFamily: "'Space Mono', monospace",
+                              fontSize: '12px',
+                              lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {smartPinPreview.formattedMessage}
+                          </pre>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: 'var(--w)' }}>
+                          ⚠️ พิมพ์ชื่อธนาคาร (เช่น กสิกร, BBL, SCB, KTB) และเลขบัญชี 10 หลัก เพื่อให้ระบบจัดรูปแบบอัตโนมัติ
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <CeButton
+                          variant="primary"
+                          size="sm"
+                          disabled={!smartPinPreview}
+                          loading={loadingAction === 'smart-pin-tg'}
+                          onClick={() => handleSmartPinSubmit(true, true)}
+                          icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
+                        >
+                          📌 บันทึก & ปักหมุดเข้า Telegram อัตโนมัติ (Save & Auto-Pin)
+                        </CeButton>
+                        <CeButton
+                          variant="outline"
+                          size="sm"
+                          disabled={!smartPinPreview}
+                          loading={loadingAction === 'smart-pin'}
+                          onClick={() => handleSmartPinSubmit(false, false)}
+                        >
+                          💾 บันทึกเฉพาะในระบบ (Save Only)
+                        </CeButton>
+                      </div>
+                    </div>
+
+                    {/* Quick Dropdown Selector */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '6px', borderTop: '1px solid var(--br)' }}>
                       <label style={{ fontSize: '11px', color: 'var(--t2)' }}>
-                        เลือกบัญชีธนาคารที่ปักหมุดในกลุ่ม (Select Active Pinned Account):
+                        หรือเลือกจากบัญชีที่บันทึกไว้ (Or Select Saved Account):
                       </label>
                       <select
                         value={pinCodeInput}
@@ -1930,8 +2164,8 @@ export default function App() {
                           color: 'var(--t1)',
                         }}
                       >
-                        {banks.map((b) => (
-                          <option key={b.code} value={b.code}>
+                        {banks.map((b, idx) => (
+                          <option key={`${b.code}-${b.account}-${idx}`} value={b.code}>
                             {b.code} · {b.account} ({b.holder})
                           </option>
                         ))}
@@ -1952,14 +2186,25 @@ export default function App() {
                         }}
                       />
 
-                      <CeButton
-                        variant="success"
-                        onClick={handleUpdatePin}
-                        loading={loadingAction === 'pin'}
-                        icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
-                      >
-                        บันทึกบัญชีหลักวันนี้ (Save Today PIN)
-                      </CeButton>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <CeButton
+                          variant="success"
+                          size="sm"
+                          onClick={() => handleUpdatePin(true)}
+                          loading={loadingAction === 'pin-tg'}
+                          icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
+                        >
+                          📌 เลือก & ปักหมุดเข้า Telegram
+                        </CeButton>
+                        <CeButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleUpdatePin(false)}
+                          loading={loadingAction === 'pin'}
+                        >
+                          บันทึกในระบบ (Save)
+                        </CeButton>
+                      </div>
                     </div>
                   </>
                 )}
@@ -2133,7 +2378,7 @@ export default function App() {
                   สถานการณ์ทดสอบด่วน (1-Click Scenario Presets)
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <CeButton
+                    <CeButton
                     variant="outline"
                     size="sm"
                     onClick={() => {
@@ -2142,9 +2387,24 @@ export default function App() {
                       setScanAccount(summary?.pinnedBank.account || '097-0-28xxx-x');
                       setScanSender('นาย สมชาย ใจดี');
                       setScanConfidence('98.7');
+                      setScanSlipDate(formatThaiSlipDateTime());
                     }}
                   >
                     🟢 สลิปปกติ (Valid Match · 98.7%)
+                  </CeButton>
+                  <CeButton
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setScanThb('5000');
+                      setScanBank('KTB');
+                      setScanAccount('••••1670');
+                      setScanSender('ลูกค้าทดสอบ (Date Mismatch)');
+                      setScanConfidence('99.1');
+                      setScanSlipDate('13/12/2569 19:39');
+                    }}
+                  >
+                    🔴 วันที่สลิปไม่ตรง (13/12/2569)
                   </CeButton>
                   <CeButton
                     variant="outline"
@@ -2155,6 +2415,7 @@ export default function App() {
                       setScanAccount('xxx-x-x7413-x');
                       setScanSender('นาย ประเสริฐ มั่งมี');
                       setScanConfidence('96.4');
+                      setScanSlipDate(formatThaiSlipDateTime());
                     }}
                   >
                     🟠 บัญชีไม่ตรง (Bank Mismatch · KTB)
@@ -2168,6 +2429,7 @@ export default function App() {
                       setScanAccount(summary?.pinnedBank.account || '097-0-28xxx-x');
                       setScanSender('นาย สม...ย ใจดี');
                       setScanConfidence('72.0');
+                      setScanSlipDate(formatThaiSlipDateTime());
                     }}
                   >
                     🟡 สลิปไม่ชัด (Low OCR · 72%)
@@ -2213,8 +2475,8 @@ export default function App() {
                       color: 'var(--t1)',
                     }}
                   >
-                    {banks.map((b) => (
-                      <option key={b.code} value={b.code}>
+                    {banks.map((b, idx) => (
+                      <option key={`${b.code}-${idx}`} value={b.code}>
                         {b.code} · {b.name}
                       </option>
                     ))}
@@ -2260,22 +2522,43 @@ export default function App() {
                 </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
-                  ชื่อผู้โอนในสลิป (Sender Name)
-                </label>
-                <input
-                  value={scanSender}
-                  onChange={(e) => setScanSender(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    background: 'var(--b1)',
-                    border: '1px solid var(--br)',
-                    color: 'var(--t1)',
-                  }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
+                    ชื่อผู้โอนในสลิป (Sender Name)
+                  </label>
+                  <input
+                    value={scanSender}
+                    onChange={(e) => setScanSender(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      borderRadius: '8px',
+                      background: 'var(--b1)',
+                      border: '1px solid var(--br)',
+                      color: 'var(--t1)',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--t2)', display: 'block', marginBottom: '4px' }}>
+                    🗓 วันที่/เวลาสลิป (Slip Date & Time · พ.ศ.)
+                  </label>
+                  <input
+                    value={scanSlipDate}
+                    onChange={(e) => setScanSlipDate(e.target.value)}
+                    placeholder="เช่น 13/12/2569 19:39"
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      borderRadius: '8px',
+                      background: 'var(--b1)',
+                      border: '1px solid var(--br)',
+                      color: 'var(--t1)',
+                      fontFamily: "'Space Mono', monospace",
+                    }}
+                  />
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
