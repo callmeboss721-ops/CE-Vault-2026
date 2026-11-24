@@ -1,7 +1,6 @@
 // src/constants/messages.ts
-// CE VAULT — Bot Message Templates v1.0
-// ใช้งาน: import { MSG } from '@/constants/messages'
-// ตัวอย่าง: bot.sendMessage(chatId, MSG.OCR_READY({ thb: '10,000.00', ... }))
+// CE VAULT — International Bilingual Bot Message Templates v1.1 (TH / EN)
+// ใช้งาน (Usage): import { MSG } from '@/constants/messages'
 
 export interface MsgData {
   id?:             string
@@ -37,424 +36,425 @@ export const MSG = {
 
   // ══ INTAKE ══════════════════════════════════════════
   OCR_LOADING: (): string =>
-`🔄 กำลังอ่านสลิป...
-⏳ OCR กำลังประมวลผล`,
+`🔄 กำลังอ่านสลิป... (Scanning Slip...)
+⏳ ระบบ OCR กำลังประมวลผล (Processing OCR)`,
 
   OCR_READY: (d: MsgData): string =>
-`◈ CE · VERIFY
+`◈ CE · VERIFY (ตรวจสอบสลิปสำเร็จ)
 ━━━━━━━━━━━━━━
-📥 ${d.thb} THB
-💎 ${d.usdt} USDT
-🏦 ${d.bank} · ${d.account}
-👤 ${d.name}
-💱 RATE ${d.rate}
+📥 ยอดรับ (Amount): ${d.thb} THB
+💎 ยอดโอน (USDT): ${d.usdt} USDT
+🏦 บัญชีรับ (Bank): ${d.bank} · ${d.account}
+👤 ผู้โอน (Sender): ${d.name}
+💱 เรท (Rate): ${d.rate}
 ─────────────
-🟢 OCR ${d.confidence}%
-🟢 BANK MATCH
-🟢 LIMIT OK
+🟢 ความแม่นยำ (OCR): ${d.confidence}%
+🟢 บัญชีตรง (Bank Match)
+🟢 วงเงินปกติ (Limit OK)
 ─────────────
-STATUS
-🟡 READY TO CONFIRM`,
+STATUS · สถานะ
+🟡 พร้อมยืนยัน (READY TO CONFIRM)`,
 
   OCR_FAIL: (): string =>
-`◈ CE · OCR ERROR
+`◈ CE · OCR ERROR (อ่านสลิปล้มเหลว)
 ━━━━━━━━━━━━━━
-❌ อ่านสลิปไม่สำเร็จ
+❌ อ่านสลิปไม่สำเร็จ (OCR Read Failed)
 
-กรุณาถ่ายรูปใหม่ให้ชัดขึ้น
-หรือกรอกข้อมูลด้วยตนเอง`,
+กรุณาถ่ายรูปใหม่ให้ชัดขึ้น (Please retake a clearer photo)
+หรือกรอกข้อมูลด้วยตนเอง (Or enter details manually)`,
 
   OCR_LOW_CONFIDENCE: (d: MsgData): string =>
-`◈ CE · REVIEW ⚠️
+`◈ CE · REVIEW ⚠️ (รอตรวจสอบด้วยตนเอง)
 ━━━━━━━━━━━━━━
-⚠️ OCR ความแม่นยำต่ำ (${d.confidence}%)
-ตรวจสอบข้อมูลก่อนยืนยัน
+⚠️ ความแม่นยำ OCR ต่ำ (${d.confidence}% · Low Confidence)
+กรุณาตรวจสอบข้อมูลก่อนยืนยัน (Verify Before Confirming)
 
-📥 ${d.thb} THB  ← ตรวจด้วย
-🏦 ${d.bank} · ${d.account}
-👤 ${d.name}
-💱 RATE ${d.rate}`,
+📥 ยอดรับ (Amount): ${d.thb} THB ← ตรวจสอบ (Verify)
+🏦 บัญชีรับ (Bank): ${d.bank} · ${d.account}
+👤 ผู้โอน (Sender): ${d.name}
+💱 เรท (Rate): ${d.rate}`,
 
   // ══ VERIFY CHECKS ═══════════════════════════════════
   BANK_MISMATCH: (d: MsgData): string =>
-`◈ CE · MISMATCH ⚠️
+`◈ CE · MISMATCH ⚠️ (บัญชีไม่ตรงกับ PIN)
 ━━━━━━━━━━━━━━
-📄 บัญชีในสลิป
+📄 บัญชีในสลิป (Slip Account)
 🏦 ${d.bank} · ${d.account}
 
-📌 บัญชี PIN วันนี้
+📌 บัญชี PIN วันนี้ (Today's Pinned Account)
 🏦 [PIN_BANK] · [PIN_ACCOUNT]
 
-❌ บัญชีไม่ตรงกัน`,
+❌ บัญชีไม่ตรงกัน (Bank Account Mismatch)`,
 
   DUPLICATE: (d: MsgData): string =>
-`◈ CE · DUPLICATE
+`◈ CE · DUPLICATE (ตรวจพบสลิปซ้ำ)
 ━━━━━━━━━━━━━━
-⚠️ พบสลิปนี้ในระบบแล้ว
+⚠️ พบสลิปนี้ในระบบแล้ว (Duplicate Slip Detected)
 
-💰 ${d.thb} THB
-💎 ${d.usdt} USDT
-🆔 ${d.id}
-📅 ${d.time}
+💰 ยอดโอน (Amount): ${d.thb} THB
+💎 ยอดเหรียญ (USDT): ${d.usdt} USDT
+🆔 รหัสรายการ (Ref ID): ${d.id}
+📅 เวลา (Time): ${d.time}
 
-ไม่สร้างรายการใหม่`,
+ไม่สร้างรายการใหม่ (No Duplicate Entry Created)`,
 
   LIMIT_EXCEEDED: (d: MsgData): string =>
-`◈ CE · LIMIT ⚠️
+`◈ CE · LIMIT ⚠️ (วงเงินเกินกำหนด)
 ━━━━━━━━━━━━━━
-⚠️ วงเงินไม่เพียงพอ
+⚠️ วงเงินไม่เพียงพอ (Cycle Limit Exceeded)
 
-รายการนี้  + ${d.thb} THB
-ใช้ไปแล้ว   ${d.used} THB
-วงเงิน      ${d.limit} THB
-เกิน         ▼ [OVER] THB`,
+รายการนี้ (This Slip): + ${d.thb} THB
+ใช้ไปแล้ว (Used):       ${d.used} THB
+วงเงินรอบนี้ (Limit):   ${d.limit} THB
+ยอดเกิน (Over Limit):  ▼ [OVER] THB`,
 
   RATE_CHANGED: (d: MsgData): string =>
-`◈ CE · RATE CHANGED ⚠️
+`◈ CE · RATE CHANGED ⚠️ (เรทเปลี่ยนระหว่างทำรายการ)
 ━━━━━━━━━━━━━━
-⚠️ Rate เปลี่ยนระหว่างสแกน
+⚠️ เรทเปลี่ยนระหว่างสแกน (Rate Updated During Scan)
 
-Rate ตอนสแกน   [OLD_RATE]
-Rate ปัจจุบัน   ${d.rate}
+เรทตอนสแกน (Previous Rate): [OLD_RATE]
+เรทปัจจุบัน (Current Rate):   ${d.rate}
 ─────────────
-USDT เดิม   [OLD_USDT]
-USDT ใหม่   ${d.usdt}`,
+USDT เดิม (Old USDT): [OLD_USDT]
+USDT ใหม่ (New USDT): ${d.usdt}`,
 
   // ══ TRANSACTION STATUS ═══════════════════════════════
   TX_READY: (d: MsgData): string =>
-`◈ CE · READY ✅
+`◈ CE · READY ✅ (ยืนยันพร้อมโอน)
 ━━━━━━━━━━━━━━
-✅ ยืนยันรายการแล้ว
+✅ ยืนยันรายการแล้ว (Transaction Confirmed)
 
-🆔 ${d.id}
-📥 ${d.thb} THB
-💎 ${d.usdt} USDT
-💱 ${d.rate} · ${d.bank}
-🟡 READY
+🆔 รหัส (Ref ID): ${d.id}
+📥 ยอดรับ (Received): ${d.thb} THB
+💎 ต้องโอน (Expected): ${d.usdt} USDT
+💱 เรท (Rate): ${d.rate} · ${d.bank}
+🟡 สถานะ: พร้อมโอน (READY)
 
-รอส่งเข้าคิว USDT`,
+รอส่งเข้าคิวโอนเหรียญ (Awaiting USDT Queue)`,
 
   TX_PENDING: (d: MsgData): string =>
-`◈ CE · PENDING ⏳
+`◈ CE · PENDING ⏳ (อยู่ในคิวโอนเหรียญ)
 ━━━━━━━━━━━━━━
-⏳ รายการอยู่ในคิวส่ง USDT
+⏳ รายการอยู่ในคิวส่ง USDT (In Settlement Queue)
 
-🆔 ${d.id}
-💎 EXPECTED ${d.usdt} USDT
-🕐 ${d.time}
-🟦 PENDING`,
+🆔 รหัส (Ref ID): ${d.id}
+💎 ยอดรอโอน (Expected): ${d.usdt} USDT
+🕐 เวลา (Time): ${d.time}
+🟦 สถานะ: รอดำเนินการ (PENDING)`,
 
   TX_QUEUED: (d: MsgData): string =>
-`◈ CE · QUEUED ⏳
+`◈ CE · QUEUED ⏳ (เข้าคิวรอโอน USDT)
 ━━━━━━━━━━━━━━
-⏳ เข้าคิวรอส่ง USDT แล้ว
+⏳ เข้าคิวรอส่ง USDT แล้ว (Queued for Settlement)
 
-🆔 ${d.id}
-📥 ${d.thb} THB
-💎 EXPECTED ${d.usdt} USDT
-💱 RATE ${d.rate}
-🟦 PENDING`,
+🆔 รหัส (Ref ID): ${d.id}
+📥 ยอดรับ (Received): ${d.thb} THB
+💎 ยอดต้องโอน (Expected): ${d.usdt} USDT
+💱 เรท (Rate): ${d.rate}
+🟦 สถานะ: รอโอน (PENDING)`,
 
   TX_SETTLED: (d: MsgData): string =>
-`◈ CE · DONE ✓
+`◈ CE · DONE ✓ (โอนเหรียญสำเร็จ)
 ━━━━━━━━━━━━━━
-✅ Settlement สำเร็จ
+✅ โอน USDT ครบสมบูรณ์ (Settlement Completed)
 
-📥 IN    ${d.thb} THB
-📤 OUT   ${d.usdt} USDT
-💱 ${d.rate}
-⏱️ ${d.time}
-🟢 SETTLED
-🆔 ${d.id}`,
+📥 ยอดรับ (THB In):   ${d.thb} THB
+📤 ยอดโอน (USDT Out): ${d.usdt} USDT
+💱 เรท (Rate):        ${d.rate}
+⏱️ เวลา (Time):       ${d.time}
+🟢 สถานะ: สำเร็จ (SETTLED)
+🆔 รหัส (Ref ID):     ${d.id}`,
 
   TX_SHORT: (d: MsgData): string =>
-`◈ CE · SHORT 🔴
+`◈ CE · SHORT 🔴 (ยอดส่งขาด)
 ━━━━━━━━━━━━━━
-🔴 ส่ง USDT ไม่ครบ
+🔴 ส่ง USDT ไม่ครบตามจำนวน (Short Settlement)
 
-EXPECTED   ${d.usdt_expected} USDT
-SENT        ${d.usdt_sent} USDT
-SHORT       ▼ ${d.usdt_short} USDT`,
+🆔 รหัส (Ref ID):         ${d.id || '-'}
+ยอดต้องส่ง (Expected):     ${d.usdt_expected} USDT
+ส่งไปแล้ว (Sent Total):    ${d.usdt_sent} USDT
+ยอดขาด (Shortfall):       ▼ ${d.usdt_short} USDT`,
 
   TX_SHORT_RECOVERY: (d: MsgData): string =>
-`◈ CE · PENDING ⏳
+`◈ CE · PENDING ⏳ (กำลังโอนเพิ่มยอดขาด)
 ━━━━━━━━━━━━━━
-🔄 กลับเข้าคิว (SHORT Recovery)
+🔄 กลับเข้าคิวส่งเพิ่ม (Shortfall Recovery Queue)
 
-🆔 ${d.id}
-ค้าง SHORT  ▼ ${d.usdt_short} USDT
-⏳ PENDING — รอส่งเพิ่ม`,
+🆔 รหัส (Ref ID): ${d.id}
+ยอดค้าง (Shortfall): ▼ ${d.usdt_short} USDT
+⏳ สถานะ: รอโอนส่วนต่าง (PENDING TOP-UP)`,
 
   TX_SHORT_SETTLED: (d: MsgData): string =>
-`◈ CE · DONE ✓
+`◈ CE · DONE ✓ (แก้ไขยอดขาดสำเร็จ)
 ━━━━━━━━━━━━━━
-✅ SHORT แก้ไขสำเร็จ
+✅ โอนชดเชยครบแล้ว (Shortfall Resolved)
 
-TOTAL    ${d.usdt_expected} USDT ✓
+ยอดโอนรวม (Total Sent): ${d.usdt_expected} USDT ✓
 
-🟢 SETTLED
-🆔 ${d.id}`,
+🟢 สถานะ: สำเร็จ (SETTLED)
+🆔 รหัส (Ref ID): ${d.id}`,
 
   TX_SHORT_RESOLVED: (d: MsgData): string =>
-`◈ CE · DONE ✓
+`◈ CE · DONE ✓ (ส่งเพิ่มครบจำนวนแล้ว)
 ━━━━━━━━━━━━━━
-✅ ส่งเพิ่มครบจำนวนแล้ว (SHORT → SETTLED)
+✅ ส่งเพิ่มครบจำนวนแล้ว (Short Resolved → Settled)
 
-EXPECTED   ${d.usdt_expected} USDT
-SENT TOTAL ${d.usdt_sent} USDT ✓
+ยอดที่ต้องส่ง (Expected): ${d.usdt_expected} USDT
+ยอดส่งรวม (Sent Total):  ${d.usdt_sent} USDT ✓
 
-🟢 SETTLED
-🆔 ${d.id}`,
+🟢 สถานะ: สำเร็จ (SETTLED)
+🆔 รหัส (Ref ID): ${d.id}`,
 
   TX_OVERRUN: (d: MsgData): string =>
-`◈ CE · OVERRUN ⛔
+`◈ CE · OVERRUN ⛔ (ยอดส่งเกินกำหนด)
 ━━━━━━━━━━━━━━
-⛔ ยอดส่งเกิน Expected!
+⛔ ยอดส่งเกินจำนวนที่ต้องโอน! (Settlement Overrun Blocked)
 
-🆔 ${d.id}
-EXPECTED   ${d.usdt_expected} USDT
-SENT TOTAL ${d.usdt_sent} USDT ← เกิน!
+🆔 รหัส (Ref ID):        ${d.id}
+ยอดต้องส่ง (Expected):   ${d.usdt_expected} USDT
+ยอดส่งรวม (Attempted):  ${d.usdt_sent} USDT ← เกิน! (Overrun)
 
-ไม่สามารถบันทึกได้`,
+ระบบบล็อกการบันทึกอัตโนมัติ (Transaction Blocked)`,
 
   TX_REJECTED: (d: MsgData): string =>
-`◈ CE · REJECTED
+`◈ CE · REJECTED (ปฏิเสธรายการ)
 ━━━━━━━━━━━━━━
-❌ ปฏิเสธรายการแล้ว
+❌ ปฏิเสธรายการแล้ว (Transaction Rejected)
 
-🆔 ${d.id}
-📥 ${d.thb} THB
-เหตุผล: ${d.reason}
+🆔 รหัส (Ref ID): ${d.id}
+📥 ยอดโอน (Amount): ${d.thb} THB
+📝 เหตุผล (Reason): ${d.reason}
 
-🔴 REJECTED`,
+🔴 สถานะ: ปฏิเสธ (REJECTED)`,
 
   TX_REVERSED: (d: MsgData): string =>
-`◈ CE · REVERSED ↩️
+`◈ CE · REVERSED ↩️ (ยกเลิกย้อนกลับรายการ)
 ━━━━━━━━━━━━━━
-↩️ ยกเลิกย้อนกลับรายการแล้ว
+↩️ ยกเลิกย้อนกลับรายการแล้ว (Transaction Reversed)
 
-🆔 ${d.id}
-📥 ${d.thb} THB
-💎 ${d.usdt} USDT
-โดย: ${d.operator || 'ADMIN'}
-เหตุผล: ${d.reason}
+🆔 รหัส (Ref ID): ${d.id}
+📥 ยอดรับ (Amount): ${d.thb} THB
+💎 ยอดเหรียญ (USDT): ${d.usdt} USDT
+👤 ผู้อนุมัติ (By): ${d.operator || 'ADMIN'}
+📝 เหตุผล (Reason): ${d.reason}
 
-🟤 REVERSED`,
+🟤 สถานะ: ย้อนกลับรายการ (REVERSED)`,
 
   // ══ MISMATCH FLOW ════════════════════════════════════
   MISMATCH_STILL: (d: MsgData): string =>
-`◈ CE · MISMATCH ⚠️
+`◈ CE · MISMATCH ⚠️ (ตรวจสอบซ้ำแล้วยังไม่ตรง)
 ━━━━━━━━━━━━━━
-🔁 RECHECK แล้ว — ยังไม่ตรง
+🔁 ตรวจสอบซ้ำแล้ว — บัญชียังไม่ตรง (Rechecked · Still Mismatched)
 
-📄 สลิป: ${d.bank} · ${d.account}
-📌 PIN:  [PIN_BANK] · [PIN_ACCOUNT]
+📄 บัญชีสลิป (Slip): ${d.bank} · ${d.account}
+📌 บัญชีหลัก (PIN):  [PIN_BANK] · [PIN_ACCOUNT]
 
-❌ ยังไม่ตรงกัน`,
+❌ บัญชีไม่ตรงกัน (Account Mismatch)`,
 
   MISMATCH_CLEARED: (d: MsgData): string =>
-`◈ CE · VERIFY ✓
+`◈ CE · VERIFY ✓ (ตรวจสอบซ้ำผ่านแล้ว)
 ━━━━━━━━━━━━━━
-✅ RECHECK ผ่านแล้ว
+✅ บัญชีตรงกับ PIN ปัจจุบันแล้ว (Recheck Passed)
 
-📥 ${d.thb} THB
-💎 ${d.usdt} USDT
-🏦 ${d.bank} · ${d.account}
-🟢 BANK MATCH ✓`,
+📥 ยอดรับ (Amount): ${d.thb} THB
+💎 ยอดโอน (USDT):   ${d.usdt} USDT
+🏦 บัญชีรับ (Bank):   ${d.bank} · ${d.account}
+🟢 สถานะ: บัญชีตรง (BANK MATCH ✓)`,
 
   MISMATCH_OVERRIDDEN: (d: MsgData): string =>
-`◈ CE · OVERRIDE ⚡
+`◈ CE · OVERRIDE ⚡ (อนุมัติกรณีพิเศษ)
 ━━━━━━━━━━━━━━
-⚡ Override บัญชีไม่ตรงสำเร็จ
+⚡ อนุมัติ Override บัญชีไม่ตรงสำเร็จ (Mismatch Override Approved)
 
-🆔 ${d.id}
-โดย: ${d.operator || 'OP-01'}
-เหตุผล: ${d.reason}
+🆔 รหัส (Ref ID): ${d.id}
+👤 ผู้อนุมัติ (Operator): ${d.operator || 'OP-01'}
+📝 เหตุผล (Reason): ${d.reason}
 
-🟡 READY TO SETTLE`,
+🟡 สถานะ: พร้อมโอน (READY TO SETTLE)`,
 
   OVERRIDE_SUCCESS: (d: MsgData): string =>
-`◈ CE · OVERRIDE ⚡
+`◈ CE · OVERRIDE ⚡ (บันทึกการอนุมัติพิเศษ)
 ━━━━━━━━━━━━━━
-⚡ Override บันทึกแล้ว
+⚡ บันทึก Override สำเร็จ (Override Logged)
 
-เหตุผล: ${d.reason}
-โดย: ${d.operator}
-เวลา: ${d.time}
+📝 เหตุผล (Reason): ${d.reason}
+👤 โดย (Operator):  ${d.operator}
+🕐 เวลา (Time):     ${d.time}
 
-📥 ${d.thb} THB
-💎 ${d.usdt} USDT
-🟡 READY`,
+📥 ยอดรับ (Amount): ${d.thb} THB
+💎 ยอดโอน (USDT):   ${d.usdt} USDT
+🟡 สถานะ: พร้อมโอน (READY)`,
 
   SETTLEMENT_OVERRUN: (d: MsgData): string =>
-`◈ CE · OVERRUN ⛔
+`◈ CE · OVERRUN ⛔ (แจ้งเตือนยอดเกิน)
 ━━━━━━━━━━━━━━
-⛔ ยอดจะเกิน Expected
+⛔ ยอดโอนรวมจะเกินกำหนด (Exceeds Expected USDT)
 
-EXPECTED    ${d.usdt_expected} USDT
-SENT TOTAL  ${d.usdt_sent} USDT
-ยอดที่กรอก  + [INPUT] USDT ← เกิน!
+ยอดต้องส่ง (Expected):   ${d.usdt_expected} USDT
+ส่งไปแล้ว (Sent Total):   ${d.usdt_sent} USDT
+ยอดที่กรอก (Input):      + [INPUT] USDT ← เกิน! (Overrun)
 
-ไม่สามารถบันทึกได้`,
+ไม่สามารถบันทึกได้ (Action Blocked)`,
 
   // ══ CYCLE ════════════════════════════════════════════
   SUMMARY: (d: MsgData): string =>
-`💎 CE VAULT
+`💎 CE VAULT · สรุปภาพรวม (Overview)
 ━━━━━━━━━━━━━━
-🏠 ${d.cycle_current}
-💳 LIMIT       ฿${d.limit}
-📊 USED        ฿${d.used}
-🟢 REMAINING   ฿${d.remaining}
-📥 RECEIVED    ฿${d.used}
-📤 SENT        $[SENT_USDT]
-⏳ PENDING     $[PEND_USDT]
-🔴 NEGATIVE    -$[NEG_USDT]
-✨ PROFIT      ฿[PROFIT]
-💱 RATE        ${d.rate}
+🏠 รอบงาน (Cycle):       ${d.cycle_current}
+💳 วงเงิน (Limit):        ฿${d.limit}
+📊 ใช้ไปแล้ว (Used):       ฿${d.used}
+🟢 คงเหลือ (Remaining):   ฿${d.remaining}
+📥 ยอดรับรวม (Received):  ฿${d.used}
+📤 โอนแล้ว (Sent):        $[SENT_USDT]
+⏳ รอโอน (Pending):       $[PEND_USDT]
+🔴 ยอดขาด (Shortfall):    -$[NEG_USDT]
+✨ กำไร (Profit):         ฿[PROFIT]
+💱 เรท (Desk Rate):       ${d.rate}
 ━━━━━━━━━━━━━━
 [N] SETTLED · [N] READY · [N] PENDING · [N] SHORT`,
 
   CYCLE_SUMMARY: (d: MsgData): string =>
-`💎 CE VAULT · SUMMARY
+`💎 CE VAULT · สรุปรอบงาน (Cycle Summary)
 ━━━━━━━━━━━━━━
-🏠 CYCLE       ${d.cycle_current}
-💳 LIMIT       ฿${d.limit}
-📊 USED        ฿${d.used}
-🟢 REMAINING   ฿${d.remaining}
-📥 RECEIVED    ฿${d.thb || d.used}
-📤 SENT        ${d.usdt} USDT
-⏳ PENDING     ${d.usdt_expected} USDT
-🔴 SHORT       -${d.usdt_short} USDT
-✨ PROFIT      ฿${d.profit || '0.00'}
-💱 RATE        ${d.rate}`,
+🏠 รอบงาน (Cycle):       ${d.cycle_current}
+💳 วงเงิน (Limit):        ฿${d.limit}
+📊 ใช้ไปแล้ว (Used):       ฿${d.used}
+🟢 คงเหลือ (Remaining):   ฿${d.remaining}
+📥 ยอดรับรวม (Received):  ฿${d.thb || d.used}
+📤 โอนแล้ว (USDT Sent):   ${d.usdt} USDT
+⏳ รอโอน (Pending):       ${d.usdt_expected} USDT
+🔴 ยอดขาด (Shortfall):    -${d.usdt_short} USDT
+✨ กำไรรอบนี้ (Profit):    ฿${d.profit || '0.00'}
+💱 เรทโต๊ะ (Desk Rate):    ${d.rate}`,
 
   NEW_CYCLE_BLOCKED: (d: MsgData): string =>
-`◈ CE · NEW CYCLE ⛔
+`◈ CE · NEW CYCLE ⛔ (ไม่สามารถเปิดรอบใหม่ได้)
 ━━━━━━━━━━━━━━
-❌ ยังเปิดรอบใหม่ไม่ได้
+❌ ยังเปิดรอบใหม่ไม่ได้ (New Cycle Blocked)
 
-รายการค้างอยู่:
-⏳ PENDING  ${d.count_pending} รายการ
-🔴 SHORT    ${d.count_short} รายการ
-🟡 READY    ${d.count_ready} รายการ
+มีรายการค้างอยู่ (Open Items Remaining):
+⏳ รอโอน (PENDING):  ${d.count_pending} รายการ (items)
+🔴 ส่งขาด (SHORT):    ${d.count_short} รายการ (items)
+🟡 รอยืนยัน (READY):  ${d.count_ready} รายการ (items)
 
-แก้ไขรายการข้างต้นก่อน`,
+กรุณาเคลียร์รายการข้างต้นก่อน (Resolve Pending Items First)`,
 
   NEW_CYCLE_SUCCESS: (d: MsgData): string =>
-`◈ CE · NEW CYCLE ⚡
+`◈ CE · NEW CYCLE ⚡ (เปิดรอบงานใหม่สำเร็จ)
 ━━━━━━━━━━━━━━
-✅ เปิดรอบใหม่สำเร็จ
+✅ เปิดรอบใหม่สำเร็จ (New Cycle Activated)
 
-${d.cycle_current}  ✓ CLOSED
-${d.cycle_new}  🆕 OPEN
+${d.cycle_current}  ✓ ปิดรอบแล้ว (CLOSED)
+${d.cycle_new}  🆕 เปิดใช้งาน (OPEN)
 ━━━━━━━━━━━━━━
-💳 LIMIT  ${d.limit} THB
-📊 USED   0 THB
+💳 วงเงินรอบใหม่ (Limit): ${d.limit} THB
+📊 ยอดใช้สะสม (Used):    0 THB
 
-รอบใหม่พร้อมใช้งาน`,
+รอบใหม่พร้อมใช้งาน (Ready for Operations)`,
 
   CYCLE_NEW_DONE: (d: MsgData): string =>
-`◈ CE · NEW CYCLE ⚡
+`◈ CE · NEW CYCLE ⚡ (สรุปการเปลี่ยนรอบงาน)
 ━━━━━━━━━━━━━━
-✅ ปิดรอบ ${d.cycle_current} → เปิดรอบ ${d.cycle_new}
+✅ ปิดรอบ ${d.cycle_current} → เปิดรอบ ${d.cycle_new} (Cycle Rollover)
 
-📥 ยอดรับรอบเก่า  ฿${d.thb}
-📤 ส่ง USDT รวม   ${d.usdt} USDT
-⏳ ยกยอดค้าง      ${d.count_pending ?? 0} รายการ
+📥 ยอดรับรอบเก่า (Closed THB): ฿${d.thb}
+📤 ส่ง USDT รวม (Total USDT):  ${d.usdt} USDT
+⏳ ยกยอดค้าง (Carried Over):   ${d.count_pending ?? 0} รายการ (items)
 
-🆕 ${d.cycle_new} พร้อมใช้งาน`,
+🆕 รอบ ${d.cycle_new} พร้อมรับงาน (Active)`,
 
   // ══ ALERTS ════════════════════════════════════════════
   ALERT_SHORT_30M: (d: MsgData): string =>
-`⚠️ CE VAULT ALERT
+`⚠️ CE VAULT ALERT (แจ้งเตือนยอดขาดค้าง)
 ━━━━━━━━━━━━━━
-⚠️ SHORT ค้างนาน
+⚠️ รายการส่งขาดค้างเกินกำหนด (Shortfall Aging > 30m)
 
-🆔 ${d.id}
-💎 SHORT ▼ ${d.usdt_short} USDT
-⏰ ค้างมา ${d.minutes} นาที`,
+🆔 รหัส (Ref ID):    ${d.id}
+💎 ยอดขาด (Short):   ▼ ${d.usdt_short} USDT
+⏰ เวลาค้าง (Elapsed): ${d.minutes} นาที (mins)`,
 
   ALERT_SHORT_2H: (d: MsgData): string =>
-`🚨 CE VAULT CRITICAL
+`🚨 CE VAULT CRITICAL (แจ้งเตือนวิกฤตยอดขาด)
 ━━━━━━━━━━━━━━
-🔴 SHORT ค้างนานมาก
+🔴 รายการส่งขาดค้างนานมาก (Critical Shortfall > 2h)
 
-🆔 ${d.id}
-💎 SHORT ▼ ${d.usdt_short} USDT
-⏰ ค้างมา ${d.hours}
+🆔 รหัส (Ref ID):    ${d.id}
+💎 ยอดขาด (Short):   ▼ ${d.usdt_short} USDT
+⏰ เวลาค้าง (Elapsed): ${d.hours}
 
-⛔ บล็อก New Cycle
-แก้ไขด่วน!`,
+⛔ บล็อกการเปิดรอบใหม่ (New Cycle Blocked)
+กรุณาดำเนินการด่วน! (Immediate Action Required)`,
 
   ALERT_PENDING_60M: (d: MsgData): string =>
-`⚠️ CE VAULT ALERT
+`⚠️ CE VAULT ALERT (แจ้งเตือนคิวโอนค้างนาน)
 ━━━━━━━━━━━━━━
-⚠️ PENDING ค้างนาน
+⚠️ รายการรอโอนค้างนาน (Pending Queue > 60m)
 
-🆔 ${d.id}
-💎 ${d.usdt} USDT
-⏰ ค้างมา ${d.minutes} นาที`,
+🆔 รหัส (Ref ID):    ${d.id}
+💎 ยอดรอโอน (USDT):  ${d.usdt} USDT
+⏰ เวลาค้าง (Elapsed): ${d.minutes} นาที (mins)`,
 
   ALERT_PENDING_STALE: (d: MsgData): string =>
-`⚠️ CE VAULT ALERT
+`⚠️ CE VAULT ALERT (รายการรอโอนค้างในคิว)
 ━━━━━━━━━━━━━━
-⚠️ รายการ PENDING ค้างนาน
+⚠️ รายการ PENDING ค้างนาน (Stale Pending Transaction)
 
-🆔 ${d.id}
-📥 ${d.thb} THB
-💎 ค้างส่ง ${d.usdt} USDT
-⏰ ค้างมา ${d.minutes} นาที`,
+🆔 รหัส (Ref ID):       ${d.id}
+📥 ยอดรับ (Received):   ${d.thb} THB
+💎 ค้างส่ง (Remaining):  ${d.usdt} USDT
+⏰ เวลาค้าง (Waiting):  ${d.minutes} นาที (mins)`,
 
   ALERT_LIMIT_80: (d: MsgData): string =>
-`⚠️ CE VAULT ALERT
+`⚠️ CE VAULT ALERT (แจ้งเตือนวงเงิน 80%)
 ━━━━━━━━━━━━━━
-⚠️ ใช้วงเงินเกิน 80%
+⚠️ ใช้วงเงินเกิน 80% แล้ว (80% Cycle Limit Reached)
 
-${d.cycle_current} · ใช้ ${d.percent}%
-USED     ${d.used} THB
-LIMIT    ${d.limit} THB
-LEFT      ${d.remaining} THB`,
+${d.cycle_current} · ใช้ไป (Used): ${d.percent}%
+ยอดใช้ (Used):       ${d.used} THB
+วงเงิน (Limit):      ${d.limit} THB
+คงเหลือ (Remaining): ${d.remaining} THB`,
 
   ALERT_LIMIT_95: (d: MsgData): string =>
-`🚨 CE VAULT ALERT
+`🚨 CE VAULT ALERT (แจ้งเตือนวงเงินใกล้เต็ม 95%)
 ━━━━━━━━━━━━━━
-🔴 วงเงินใกล้เต็มแล้ว!
+🔴 วงเงินใกล้เต็มแล้ว! (95% Critical Limit Warning)
 
-${d.cycle_current} · ใช้ ${d.percent}%
-USED     ${d.used} THB
-LIMIT    ${d.limit} THB
-LEFT      ${d.remaining} THB
+${d.cycle_current} · ใช้ไป (Used): ${d.percent}%
+ยอดใช้ (Used):       ${d.used} THB
+วงเงิน (Limit):      ${d.limit} THB
+คงเหลือ (Remaining): ${d.remaining} THB
 
-รับได้อีกไม่มาก`,
+กรุณาเตรียมสลับบัญชี PIN หรือเปิดรอบใหม่ (Prepare New PIN / Cycle)`,
 
   ALERT_EXCEPTION: (): string =>
-`🚨 CE VAULT ALERT
+`🚨 CE VAULT ALERT (พบรายการผิดปกติ)
 ━━━━━━━━━━━━━━
-🔴 มี Exception ยังไม่แก้
+🔴 มีรายการ Exception ยังไม่แก้ไข (Unresolved Settlement Exception)
 
 1 SETTLEMENT EXCEPTION OPEN
-⛔ บล็อก New Cycle
+⛔ บล็อกการเปิดรอบใหม่ (New Cycle Blocked)
 
-ต้องให้ Admin แก้ไขก่อน`,
+ต้องให้ผู้ดูแลระบบตรวจสอบก่อน (Admin Resolution Required)`,
 
   SYSTEM_ERROR: (): string =>
-`◈ CE · ERROR ⚠️
+`◈ CE · ERROR ⚠️ (ระบบขัดข้องชั่วคราว)
 ━━━━━━━━━━━━━━
-⚠️ ระบบขัดข้อง
+⚠️ ระบบขัดข้อง (System Error)
 
-ไม่สามารถดำเนินการได้
-ไม่มีข้อมูลถูกบันทึก
+ไม่สามารถดำเนินการได้ (Operation Failed)
+ไม่มีข้อมูลถูกเปลี่ยนแปลง (State Unchanged)
 
-กรุณาลองใหม่อีกครั้ง`,
+กรุณาลองใหม่อีกครั้ง (Please Retry)`,
 
   ALERT_OCR_FAIL_RATE: (d: MsgData): string =>
-`⚠️ CE VAULT ALERT
+`⚠️ CE VAULT ALERT (อัตราอ่านสลิปพลาดสูง)
 ━━━━━━━━━━━━━━
-⚠️ OCR อ่านสลิปผิดพลาดบ่อย
+⚠️ OCR อ่านสลิปผิดพลาดบ่อย (High OCR Failure Rate)
 
-ช่วง 1 ชั่วโมงที่ผ่านมา
-อัตราผิดพลาด  ${d.percent}% (เกิน 20%)
+ช่วง 1 ชั่วโมงที่ผ่านมา (Last 1 Hour)
+อัตราผิดพลาด (Fail Rate): ${d.percent}% (เกินเกณฑ์ 20% · Threshold > 20%)
 
-ตรวจสอบ OCR Service`,
+กรุณาตรวจสอบระบบ OCR (Check OCR Service Health)`,
 
 } as const

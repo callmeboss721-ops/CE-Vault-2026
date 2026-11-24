@@ -2,7 +2,17 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadAutoConfig, publicConfig, fetchMarketRate, sendTelegram } from './autoconfig.mjs';
+import {
+  loadAutoConfig,
+  saveRuntimeSettings,
+  publicConfig,
+  maskSecret,
+  fetchMarketRate,
+  verifyTelegramBot,
+  detectTelegramChats,
+  sendTelegramDetailed,
+  sendTelegram,
+} from './autoconfig.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.CE_DATA_DIR || path.join(__dirname, '..', 'data');
@@ -365,6 +375,125 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, ...publicConfig(CFG), rateMode: state.rateMode || 'manual' });
     }
 
+    // Full Settings API (API + Telegram Bot + Delivery Log)
+    if (req.method === 'GET' && pathname === '/api/settings') {
+      return sendJson(res, 200, {
+        ok: true,
+        engineMode: 'backend-api-server',
+        rateSpread: CFG.rateSpread,
+        rateMode: state.rateMode || 'manual',
+        telegram: {
+          enabled: CFG.integrations.telegram.enabled,
+          hasToken: Boolean(CFG.integrations.telegram.token),
+          maskedToken: maskSecret(CFG.integrations.telegram.token),
+          chatId: CFG.integrations.telegram.chatId,
+          botInfo: CFG.botInfo,
+          notifyEvents: CFG.notifyEvents,
+          deliveryLog: CFG.deliveryLog || [],
+        },
+        integrations: publicConfig(CFG).integrations,
+      });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/settings') {
+      const body = await parseJsonBody(req);
+      const updates = {};
+      if (typeof body.botToken === 'string' && !body.botToken.includes('••••')) {
+        updates.botToken = body.botToken.trim();
+        if (!updates.botToken) updates.botInfo = null;
+      }
+      if (body.clearToken === true) {
+        updates.botToken = '';
+        updates.botInfo = null;
+      }
+      if (typeof body.chatId === 'string') {
+        updates.chatId = body.chatId.trim();
+      }
+      if (body.notifyEvents && typeof body.notifyEvents === 'object') {
+        updates.notifyEvents = body.notifyEvents;
+      }
+      if (body.rateSpread !== undefined && !isNaN(Number(body.rateSpread))) {
+        updates.rateSpread = Number(body.rateSpread);
+      }
+
+      if (updates.botToken) {
+        const verified = await verifyTelegramBot(updates.botToken);
+        if (verified.ok) {
+          updates.botInfo = verified.bot;
+        }
+      }
+
+      saveRuntimeSettings(CFG, updates);
+      if (state.rateMode === 'auto' && market.rate) {
+        state.rate = Number((market.rate + CFG.rateSpread).toFixed(2));
+        saveState(state);
+      }
+
+      return sendJson(res, 200, {
+        ok: true,
+        rateSpread: CFG.rateSpread,
+        telegram: {
+          enabled: CFG.integrations.telegram.enabled,
+          hasToken: Boolean(CFG.integrations.telegram.token),
+          maskedToken: maskSecret(CFG.integrations.telegram.token),
+          chatId: CFG.integrations.telegram.chatId,
+          botInfo: CFG.botInfo,
+          notifyEvents: CFG.notifyEvents,
+          deliveryLog: CFG.deliveryLog || [],
+        },
+      });
+    }
+
+    // Verify Telegram Bot Token via real getMe call
+    if (req.method === 'POST' && pathname === '/api/telegram/verify') {
+      const body = await parseJsonBody(req);
+      const tokenToTest =
+        typeof body.botToken === 'string' && body.botToken.trim() && !body.botToken.includes('••••')
+          ? body.botToken.trim()
+          : CFG.integrations.telegram.token;
+      const result = await verifyTelegramBot(tokenToTest);
+      if (result.ok && tokenToTest === CFG.integrations.telegram.token) {
+        saveRuntimeSettings(CFG, { botInfo: result.bot });
+      }
+      return sendJson(res, result.ok ? 200 : 400, result);
+    }
+
+    // Auto-detect recent Telegram chats/groups via getUpdates
+    if (req.method === 'POST' && pathname === '/api/telegram/detect-chats') {
+      const body = await parseJsonBody(req);
+      const tokenToUse =
+        typeof body.botToken === 'string' && body.botToken.trim() && !body.botToken.includes('••••')
+          ? body.botToken.trim()
+          : CFG.integrations.telegram.token;
+      const result = await detectTelegramChats(tokenToUse);
+      return sendJson(res, result.ok ? 200 : 400, result);
+    }
+
+    // Send a REAL live test or custom message to Telegram
+    if (req.method === 'POST' && pathname === '/api/telegram/test') {
+      const body = await parseJsonBody(req);
+      const overrideToken =
+        typeof body.botToken === 'string' && body.botToken.trim() && !body.botToken.includes('••••')
+          ? body.botToken.trim()
+          : undefined;
+      const overrideChatId = typeof body.chatId === 'string' && body.chatId.trim() ? body.chatId.trim() : undefined;
+      const summary = computeSummary(state);
+      const text =
+        typeof body.text === 'string' && body.text.trim()
+          ? body.text.trim()
+          : `◈ CE VAULT · LIVE BOT TEST ✓\n(ทดสอบการเชื่อมต่อ Telegram สำเร็จ)\n━━━━━━━━━━━━━━\n🏠 รอบงาน (Cycle): ${state.cycle}\n📌 บัญชีหลัก (PIN): ${state.pinnedBank.code} · ${state.pinnedBank.account}\n💱 เรทโต๊ะ (Desk Rate): ${state.rate.toFixed(2)} THB/USDT\n📈 เรทตลาด (Market): ${market.rate ? market.rate.toFixed(2) : state.marketRate.toFixed(2)} THB (${market.source || 'Auto'})\n📊 ยอดรับสะสม (Received): ฿${summary.receivedThb.toLocaleString()}\n⏱️ เวลา (Time): ${nowHHMM()} น.`;
+
+      const result = await sendTelegramDetailed(CFG, text, {
+        event: body.event || 'live-test',
+        overrideToken,
+        overrideChatId,
+      });
+      return sendJson(res, result.ok ? 200 : 400, {
+        ...result,
+        deliveryLog: CFG.deliveryLog || [],
+      });
+    }
+
     // Live market rate
     if (req.method === 'GET' && pathname === '/api/market') {
       if (url.searchParams.get('refresh') === '1') await refreshMarket();
@@ -417,17 +546,17 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 422, {
           ok: false,
           error: 'ocr_failed',
-          message: 'อ่านสลิปไม่สำเร็จ ความแม่นยำต่ำกว่า 60%',
+          message: 'อ่านสลิปไม่สำเร็จ ความแม่นยำต่ำกว่า 60% (OCR Confidence < 60%)',
         });
       } else if (confidence < 80) {
         status = 'REVIEW';
-        notes = `OCR ความแม่นยำต่ำ (${confidence}%) — ต้องตรวจสอบก่อนยืนยัน`;
+        notes = `ความแม่นยำ OCR ต่ำ (${confidence}% · Low Confidence) — รอตรวจสอบ (Review Required)`;
       } else if (!bankMatchesPin) {
         status = 'MISMATCH';
-        notes = `บัญชีในสลิป ${bank} (${account}) ≠ บัญชี PIN วันนี้ ${state.pinnedBank.code} (${state.pinnedBank.account})`;
+        notes = `บัญชีในสลิป (Slip) ${bank} (${account}) ≠ บัญชี PIN วันนี้ (${state.pinnedBank.code} · ${state.pinnedBank.account})`;
       } else if (summary.usedThb + thb > state.limitThb) {
         status = 'REVIEW';
-        notes = `วงเงินเกิน Limit ฿${(summary.usedThb + thb - state.limitThb).toLocaleString()} — ต้องกด Limit Override`;
+        notes = `วงเงินเกินกำหนด (Limit Exceeded +฿${(summary.usedThb + thb - state.limitThb).toLocaleString()})`;
       }
 
       const nextNum = 46 + state.transactions.length;
@@ -450,7 +579,15 @@ const server = http.createServer(async (req, res) => {
 
       state.transactions.unshift(newTx);
       saveState(state);
-      sendTelegram(CFG, `◈ CE · NEW SLIP (${newTx.status})\n🆔 ${newTx.id}\n📥 ${thb.toLocaleString()} THB\n💎 ${usdtExpected} USDT\n🏦 ${bank} · ${account}\n${notes}`);
+      const shouldNotify =
+        status === 'MISMATCH' ? CFG.notifyEvents.onMismatch : CFG.notifyEvents.onScan;
+      if (shouldNotify) {
+        sendTelegram(
+          CFG,
+          `◈ CE · NEW SLIP (รับสลิปใหม่ · ${newTx.status})\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${newTx.id}\n📥 ยอดรับ (Amount): ${thb.toLocaleString()} THB\n💎 ยอดโอน (USDT): ${usdtExpected} USDT\n🏦 บัญชี (Bank): ${bank} · ${account}\n👤 ผู้โอน (Sender): ${sender}\nℹ️ ${notes}`,
+          status === 'MISMATCH' ? 'mismatch-alert' : 'slip-scan'
+        );
+      }
 
       return sendJson(res, 201, {
         ok: true,
@@ -468,45 +605,54 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       const tx = state.transactions.find((t) => t.id === txId);
       if (!tx) {
-        return sendJson(res, 404, { ok: false, error: 'tx_not_found', message: `ไม่พบรายการ ${txId}` });
+        return sendJson(res, 404, { ok: false, error: 'tx_not_found', message: `ไม่พบรายการ (Transaction Not Found): ${txId}` });
       }
 
       if (action === 'confirm') {
         tx.status = body.toPending ? 'PENDING' : 'READY';
-        tx.notes = body.toPending ? 'เข้าคิวรอโอน USDT (PENDING)' : 'ยืนยันสลิปแล้ว พร้อมโอน USDT (READY)';
+        tx.notes = body.toPending
+          ? 'เข้าคิวรอโอน USDT (Queued · PENDING)'
+          : 'ยืนยันสลิปแล้ว พร้อมโอน USDT (Confirmed · READY)';
       } else if (action === 'queue') {
         tx.status = 'PENDING';
-        tx.notes = 'เข้าคิวรอโอน USDT (PENDING)';
+        tx.notes = 'เข้าคิวรอโอน USDT (Queued · PENDING)';
       } else if (action === 'override') {
-        const reason = String(body.reason || 'ยืนยันโดย Operator').trim();
+        const reason = String(body.reason || 'ยืนยันโดยเจ้าหน้าที่ (Approved by Operator)').trim();
         tx.status = 'READY';
         tx.overrideReason = reason;
-        tx.notes = `⚡ OVERRIDE: ${reason}`;
+        tx.notes = `⚡ อนุมัติพิเศษ (OVERRIDE): ${reason}`;
+        if (CFG.notifyEvents.onMismatch) {
+          sendTelegram(
+            CFG,
+            `◈ CE · OVERRIDE ⚡ (อนุมัติกรณีพิเศษ)\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📥 ยอดรับ (Amount): ${tx.thb.toLocaleString()} THB\n💎 ยอดโอน (USDT): ${tx.usdtExpected} USDT\n📝 เหตุผล (Reason): ${reason}\n🟡 สถานะ: พร้อมโอน (READY)`,
+            'override'
+          );
+        }
       } else if (action === 'recheck') {
         if (String(tx.bank).toUpperCase() === String(state.pinnedBank.code).toUpperCase()) {
           tx.status = 'READY';
-          tx.notes = 'RECHECK ✓ บัญชีตรงกับ PIN ปัจจุบันแล้ว';
+          tx.notes = 'ตรวจสอบซ้ำผ่าน ✓ บัญชีตรงกับ PIN ปัจจุบันแล้ว (Recheck Passed)';
         } else {
           tx.status = 'MISMATCH';
-          tx.notes = `RECHECK แล้วยังไม่ตรง (${tx.bank} ≠ ${state.pinnedBank.code})`;
+          tx.notes = `ตรวจสอบซ้ำแล้วยังไม่ตรง (Still Mismatched: ${tx.bank} ≠ ${state.pinnedBank.code})`;
         }
       } else if (action === 'reject') {
         tx.status = 'REJECTED';
-        tx.notes = body.reason ? `ปฏิเสธ: ${body.reason}` : 'ปฏิเสธรายการโดย Operator';
+        tx.notes = body.reason ? `ปฏิเสธ (Rejected): ${body.reason}` : 'ปฏิเสธรายการโดยเจ้าหน้าที่ (Rejected by Operator)';
       } else if (action === 'reverse') {
         tx.status = 'REVERSED';
-        tx.notes = body.reason ? `REVERSED: ${body.reason}` : 'ยกเลิกย้อนกลับโดย ADMIN';
+        tx.notes = body.reason ? `ย้อนกลับรายการ (Reversed): ${body.reason}` : 'ยกเลิกย้อนกลับโดยผู้ดูแล (Reversed by Admin)';
       } else if (action === 'settle') {
         const amountUsdt = Number(body.usdt ?? (tx.usdtExpected - tx.usdtSent));
         if (isNaN(amountUsdt) || amountUsdt <= 0) {
-          return sendJson(res, 400, { ok: false, error: 'invalid_amount', message: 'จำนวน USDT ต้องมากกว่า 0' });
+          return sendJson(res, 400, { ok: false, error: 'invalid_amount', message: 'จำนวน USDT ต้องมากกว่า 0 (Amount must be > 0)' });
         }
         const newTotal = Number((tx.usdtSent + amountUsdt).toFixed(2));
         if (newTotal > Number((tx.usdtExpected + 0.01).toFixed(2))) {
           return sendJson(res, 422, {
             ok: false,
             error: 'settlement_overrun',
-            message: `OVERRUN: ยอดส่งรวม (${newTotal} USDT) เกินยอดที่ต้องส่ง (${tx.usdtExpected} USDT)`,
+            message: `ยอดส่งรวมเกินกำหนด (Overrun: ${newTotal} > ${tx.usdtExpected} USDT)`,
           });
         }
         tx.usdtSent = newTotal;
@@ -521,10 +667,17 @@ const server = http.createServer(async (req, res) => {
         if (diff <= 0.005) {
           tx.usdtSent = tx.usdtExpected;
           tx.status = 'SETTLED';
-          tx.notes = 'Settlement สำเร็จครบจำนวน';
+          tx.notes = 'โอนเหรียญครบสมบูรณ์ (Settlement Completed)';
         } else {
           tx.status = 'SHORT';
-          tx.notes = `ส่งขาด ▼ ${diff.toFixed(2)} USDT — รอส่งเพิ่ม`;
+          tx.notes = `ส่งขาด (Shortfall) ▼ ${diff.toFixed(2)} USDT — รอส่งเพิ่ม (Pending Top-up)`;
+        }
+        if (CFG.notifyEvents.onSettle) {
+          sendTelegram(
+            CFG,
+            `◈ CE · ${tx.status === 'SETTLED' ? 'DONE ✓ (โอนครบสำเร็จ)' : 'SHORT 🔴 (ยอดส่งขาด)'}\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📥 ยอดรับ (THB In): ${tx.thb.toLocaleString()} THB\n📤 โอนรวม (USDT Sent): ${tx.usdtSent} / ${tx.usdtExpected} USDT\n💱 เรท (Rate): ${tx.rate} THB`,
+            tx.status === 'SETTLED' ? 'settled' : 'short-settle'
+          );
         }
       } else if (action === 'recover-short') {
         const remaining = Number((tx.usdtExpected - tx.usdtSent).toFixed(2));
@@ -534,7 +687,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 422, {
             ok: false,
             error: 'settlement_overrun',
-            message: `OVERRUN: ยอดส่งรวม (${newTotal} USDT) เกินยอดที่ต้องส่ง (${tx.usdtExpected} USDT)`,
+            message: `ยอดส่งรวมเกินกำหนด (Overrun: ${newTotal} > ${tx.usdtExpected} USDT)`,
           });
         }
         tx.usdtSent = newTotal;
@@ -548,10 +701,17 @@ const server = http.createServer(async (req, res) => {
         if (diff <= 0.005) {
           tx.usdtSent = tx.usdtExpected;
           tx.status = 'SETTLED';
-          tx.notes = 'ส่งเพิ่มครบจำนวนแล้ว (SHORT → SETTLED)';
+          tx.notes = 'ส่งเพิ่มครบจำนวนแล้ว (Short Resolved → SETTLED)';
         } else {
           tx.status = 'PENDING';
-          tx.notes = `ส่งเพิ่มแล้ว เหลือค้าง ${diff.toFixed(2)} USDT`;
+          tx.notes = `ส่งเพิ่มแล้ว เหลือค้าง ${diff.toFixed(2)} USDT (Remaining Shortfall)`;
+        }
+        if (CFG.notifyEvents.onSettle) {
+          sendTelegram(
+            CFG,
+            `◈ CE · SHORT RECOVERY (${tx.status})\n━━━━━━━━━━━━━━\n🆔 รหัส (Ref ID): ${tx.id}\n📤 ส่งเพิ่ม (Top-up): +${sendMore.toFixed(2)} USDT\n💎 ยอดส่งรวม (Total Sent): ${tx.usdtSent} / ${tx.usdtExpected} USDT`,
+            'short-recovery'
+          );
         }
       } else {
         return sendJson(res, 400, { ok: false, error: 'unknown_action' });
@@ -650,7 +810,13 @@ const server = http.createServer(async (req, res) => {
       }
 
       saveState(state);
-      sendTelegram(CFG, `◈ CE · NEW CYCLE\n${oldCycle} → ${newCycle}\n📥 ${summary.receivedThb.toLocaleString()} THB\n📤 ${summary.sentUsdt} USDT`);
+      if (CFG.notifyEvents.onNewCycle) {
+        sendTelegram(
+          CFG,
+          `◈ CE · NEW CYCLE ⚡ (เปลี่ยนรอบงาน)\n━━━━━━━━━━━━━━\n✅ ปิดรอบ ${oldCycle} → เปิดรอบ ${newCycle}\n📥 ยอดรับรวม (Received): ฿${summary.receivedThb.toLocaleString()} THB\n📤 โอนแล้ว (USDT Sent): ${summary.sentUsdt} USDT\n✨ กำไร (Profit): ฿${summary.profitThb.toLocaleString()} THB`,
+          'new-cycle'
+        );
+      }
       return sendJson(res, 200, {
         ok: true,
         oldCycle,

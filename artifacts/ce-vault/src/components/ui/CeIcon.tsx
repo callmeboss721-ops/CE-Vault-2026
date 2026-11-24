@@ -14,6 +14,7 @@ export type IconName =
   | 'new-cycle' | 'alert' | 'scan' | 'history' | 'export'
   | 'profit' | 'limit' | 'check' | 'edit' | 'close' | 'back' | 'arrow-up' | 'arrow-down' | 'refresh' | 'gem'
   | 'send' | 'cycle' | 'pin' | 'user' | 'amount' | 'usdt' | 'trash' | 'recheck' | 'override' | 'copy'
+  | 'bot' | 'key' | 'link'
 
 interface CeIconProps {
   name: IconName
@@ -74,6 +75,9 @@ const ICONS: Record<IconName, React.ReactNode> = {
   recheck:    <><path d="M21 12a9 9 0 11-3-6.7L21 8"/><polyline points="21,3 21,8 16,8"/><polyline points="9,12 11,14 15,10"/></>,
   override:   <><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></>,
   copy:       <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></>,
+  bot:        <><rect x="3" y="8" width="18" height="12" rx="3"/><path d="M12 4v4"/><circle cx="12" cy="3" r="1"/><circle cx="9" cy="14" r="1.2" fill="currentColor"/><circle cx="15" cy="14" r="1.2" fill="currentColor"/><path d="M9 17.5h6"/></>,
+  key:        <><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.8 12.2L21 2"/><path d="M17 6l3 3"/><path d="M14 9l2 2"/></>,
+  link:       <><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></>,
 }
 
 export function CeIcon({ name, size = 20, color = 'currentColor', strokeWidth = 1.75 }: CeIconProps) {
