@@ -201,16 +201,43 @@ const DEFAULT_STATE = {
   ],
 };
 
+const DEMO_MODE = process.env.CE_DEMO === '1';
+const NO_PIN = { code: '', name: 'ยังไม่ได้ตั้งบัญชี (No PIN)', account: '', holder: '', updatedAt: '' };
+
+function nextCycleName(prev) {
+  const n = Number(String(prev || '').match(/(\d+)$/)?.[1]);
+  return Number.isFinite(n) && n > 0 ? `CE${n + 1}` : 'CE1';
+}
+
+// Real-use ledger: no sample transactions, no fake accounts. Operator sets PIN via Smart PIN.
+function freshLiveState(prev) {
+  return {
+    cycle: prev ? nextCycleName(prev.cycle) : 'CE1',
+    limitThb: 500000,
+    rate: Number(prev?.rate) || 34.4,
+    marketRate: Number(prev?.marketRate) || 34.1,
+    rateMode: 'auto',
+    autoRateSeeded: true,
+    live: true,
+    pinnedBank: { ...NO_PIN },
+    banks: [],
+    transactions: [],
+    cycleHistory: [],
+    txSeq: 0,
+  };
+}
+
 function loadState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     if (!fs.existsSync(STATE_FILE)) {
-      fs.writeFileSync(STATE_FILE, JSON.stringify(DEFAULT_STATE, null, 2));
-      return structuredClone(DEFAULT_STATE);
+      const initial = DEMO_MODE ? structuredClone(DEFAULT_STATE) : freshLiveState(null);
+      fs.writeFileSync(STATE_FILE, JSON.stringify(initial, null, 2));
+      return initial;
     }
     return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   } catch {
-    return structuredClone(DEFAULT_STATE);
+    return DEMO_MODE ? structuredClone(DEFAULT_STATE) : freshLiveState(null);
   }
 }
 
@@ -275,6 +302,7 @@ function computeSummary(state) {
     rate: state.rate,
     marketRate: state.marketRate,
     pinnedBank: state.pinnedBank,
+    live: Boolean(state.live),
     counts,
   };
 }
@@ -657,12 +685,15 @@ const server = http.createServer(async (req, res) => {
       if (!Number.isFinite(thb) || thb <= 0) {
         return sendJson(res, 400, { ok: false, error: 'invalid_amount', message: 'ยอดเงินในสลิปต้องมากกว่า 0 บาท (THB amount must be > 0)' });
       }
+      if (!state.pinnedBank?.account) {
+        return sendJson(res, 409, { ok: false, error: 'no_pin', message: 'ยังไม่ได้ตั้งบัญชีรับเงิน กรุณาตั้ง Smart PIN ก่อนรับสลิป (Set PIN account first)' });
+      }
       const bank = String(body.bank || state.pinnedBank.code);
       const bankMatchesPin = bank.toUpperCase() === String(state.pinnedBank.code).toUpperCase();
-      const account = String(body.account || (bankMatchesPin ? state.pinnedBank.account : 'xxx-x-x7413-x'));
-      const sender = String(body.sender || 'นาย สมชาย ใจดี');
+      const account = String(body.account || (bankMatchesPin ? state.pinnedBank.account : '-'));
+      const sender = String(body.sender || 'ไม่ระบุชื่อ (Unknown)');
       const confidence = Number(body.confidence ?? 98.7);
-      const forceDuplicate = Boolean(body.forceDuplicate);
+      const forceDuplicate = !state.live && Boolean(body.forceDuplicate);
       const slipDate = String(body.slipDate || formatThaiSlipDateTime()).trim();
       const todayThaiDate = formatThaiSlipDateTime().split(' ')[0];
       const slipDatePart = slipDate.split(' ')[0];
@@ -712,7 +743,7 @@ const server = http.createServer(async (req, res) => {
       const maxExisting = state.transactions.reduce((m, t) => {
         const n = Number(String(t.id).match(/(\d+)$/)?.[1] || 0);
         return n > m ? n : m;
-      }, 45);
+      }, state.live ? 0 : 45);
       const nextNum = Math.max(Number(state.txSeq) || 0, maxExisting) + 1;
       state.txSeq = nextNum; // persisted so closed-cycle IDs are never reused
       const newTx = {
@@ -1109,7 +1140,7 @@ const server = http.createServer(async (req, res) => {
           code: String(body.code),
           name: String(body.name || body.code),
           account: String(body.account),
-          holder: String(body.holder || 'บจก. ซีอี เอ็มไพร์ โฮลดิ้ง'),
+          holder: String(body.holder || ''),
           updatedAt: `${nowHHMM()} น.`,
         };
       }
@@ -1217,8 +1248,28 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Reset demo data
+    // Start real use: wipe demo/test data, open next cycle with empty ledger and no PIN
+    if (req.method === 'POST' && pathname === '/api/dashboard/go-live') {
+      const body = await parseJsonBody(req).catch(() => ({}));
+      if (body.confirm !== 'GO-LIVE') {
+        return sendJson(res, 400, { ok: false, error: 'confirm_required', message: 'ต้องยืนยันด้วย confirm: "GO-LIVE"' });
+      }
+      state = freshLiveState(state);
+      await refreshMarket();
+      saveState(state);
+      return sendJson(res, 200, {
+        ok: true,
+        summary: computeSummary(state),
+        transactions: state.transactions,
+        cycleHistory: state.cycleHistory,
+      });
+    }
+
+    // Reset demo data (only when running with CE_DEMO=1, so real ledgers can't be overwritten)
     if (req.method === 'POST' && pathname === '/api/dashboard/reset-demo') {
+      if (!DEMO_MODE) {
+        return sendJson(res, 403, { ok: false, error: 'demo_disabled', message: 'โหมดใช้งานจริง ปิดการรีเซ็ตข้อมูลตัวอย่าง (Demo reset disabled in live mode)' });
+      }
       state = structuredClone(DEFAULT_STATE);
       await refreshMarket();
       saveState(state);

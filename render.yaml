@@ -1,18 +1,27 @@
 # Render Blueprint — 1-click deployment for CE-Vault (Single-Port Web + API + Telegram Bot)
+# LIVE: the ledger (vault-state.json) and settings live on a persistent disk at /var/data.
+# Render's free plan has no disk and wipes files on every restart/sleep — do not use it for real money.
+# This is a NEW service; it does not touch ce-vault-menu-first or its Telegram webhook.
 services:
   - type: web
     name: ce-vault-operator-desk
     runtime: node
-    plan: free
+    plan: starter
     region: singapore
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
     startCommand: pnpm run start:prod
     healthCheckPath: /api/healthz
+    disk:
+      name: ce-vault-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
       - key: CE_SERVE_STATIC
         value: "1"
+      - key: CE_DATA_DIR
+        value: /var/data
       - key: CE_RATE_SPREAD
         value: "0.3"
       - key: BOT_TOKEN

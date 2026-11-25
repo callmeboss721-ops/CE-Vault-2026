@@ -650,6 +650,7 @@ function computeSummary(s: VaultState) {
     rate: s.rate,
     marketRate: s.marketRate,
     pinnedBank: s.pinnedBank,
+    live: Boolean((s as { live?: boolean }).live),
     counts,
   };
 }
@@ -954,12 +955,15 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     if (!Number.isFinite(thb) || thb <= 0) {
       return jsonRes(400, { ok: false, error: 'invalid_amount', message: 'ยอดเงินในสลิปต้องมากกว่า 0 บาท (THB amount must be > 0)' });
     }
+    if (!state.pinnedBank?.account) {
+      return jsonRes(409, { ok: false, error: 'no_pin', message: 'ยังไม่ได้ตั้งบัญชีรับเงิน กรุณาตั้ง Smart PIN ก่อนรับสลิป (Set PIN account first)' });
+    }
     const bank = String(body.bank || state.pinnedBank.code);
     const bankMatchesPin = bank.toUpperCase() === state.pinnedBank.code.toUpperCase();
     const account = String(body.account || (bankMatchesPin ? state.pinnedBank.account : 'xxx-x-x7413-x'));
     const sender = String(body.sender || 'นาย สมชาย ใจดี');
     const confidence = Number(body.confidence ?? 98.7);
-    const forceDuplicate = Boolean(body.forceDuplicate);
+    const forceDuplicate = !(state as { live?: boolean }).live && Boolean(body.forceDuplicate);
     const slipDate = String(body.slipDate || formatThaiSlipDateTime()).trim();
     const todayThaiDate = formatThaiSlipDateTime().split(' ')[0];
     const slipDatePart = slipDate.split(' ')[0];
@@ -1008,7 +1012,7 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     const maxExisting = state.transactions.reduce((m: number, t: { id: string }) => {
       const n = Number(String(t.id).match(/(\d+)$/)?.[1] || 0);
       return n > m ? n : m;
-    }, 45);
+    }, (state as { live?: boolean }).live ? 0 : 45);
     const nextNum = Math.max(Number((state as { txSeq?: number }).txSeq) || 0, maxExisting) + 1;
     (state as { txSeq?: number }).txSeq = nextNum; // persisted so closed-cycle IDs are never reused
     const newTx = {
@@ -1379,6 +1383,24 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
       transactions: state.transactions,
       cycleHistory: state.cycleHistory,
     });
+  }
+
+  if (method === 'POST' && pathname === '/api/dashboard/go-live') {
+    if (body.confirm !== 'GO-LIVE') return jsonRes(400, { ok: false, error: 'confirm_required', message: 'ต้องยืนยันด้วย confirm: "GO-LIVE"' });
+    const n = Number(String(state.cycle || '').match(/(\d+)$/)?.[1]);
+    state = {
+      ...state,
+      cycle: Number.isFinite(n) && n > 0 ? `CE${n + 1}` : 'CE1',
+      limitThb: 500000,
+      pinnedBank: { code: '', name: 'ยังไม่ได้ตั้งบัญชี (No PIN)', account: '', holder: '', updatedAt: '' },
+      banks: [],
+      transactions: [],
+      cycleHistory: [],
+    };
+    Object.assign(state as object, { live: true, txSeq: 0, rateMode: 'auto', autoRateSeeded: true });
+    await refreshBrowserMarket();
+    saveState(state);
+    return jsonRes(200, { ok: true, summary: computeSummary(state), transactions: state.transactions, cycleHistory: state.cycleHistory });
   }
 
   if (method === 'POST' && pathname === '/api/dashboard/reset-demo') {

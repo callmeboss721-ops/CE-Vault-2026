@@ -64,6 +64,7 @@ interface VaultSummary {
   rate: number;
   marketRate: number;
   pinnedBank: BankOption;
+  live?: boolean;
   counts: Record<TxStatus, number>;
 }
 
@@ -235,13 +236,13 @@ export default function App() {
   const [rateInput, setRateInput] = useState<string>('34.23');
   const [pinCodeInput, setPinCodeInput] = useState<string>('KBANK');
   const [limitInput, setLimitInput] = useState<string>('500000');
-  const [smartPinInput, setSmartPinInput] = useState<string>('ธิติ ทองมี 1230004444 กสิกร วงเงิน 50000');
+  const [smartPinInput, setSmartPinInput] = useState<string>('');
 
   // Scan form states
-  const [scanThb, setScanThb] = useState<string>('10000');
+  const [scanThb, setScanThb] = useState<string>('');
   const [scanBank, setScanBank] = useState<string>('KBANK');
-  const [scanAccount, setScanAccount] = useState<string>('1230004444');
-  const [scanSender, setScanSender] = useState<string>('นาย สมชาย ใจดี');
+  const [scanAccount, setScanAccount] = useState<string>('');
+  const [scanSender, setScanSender] = useState<string>('');
   const [scanConfidence, setScanConfidence] = useState<string>('98.7');
   const [scanSlipDate, setScanSlipDate] = useState<string>(() => formatThaiSlipDateTime());
   const [scanResultMsg, setScanResultMsg] = useState<string>('');
@@ -409,8 +410,9 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setScanResultMsg(MSG.OCR_FAIL());
+        setScanResultMsg(data.error === 'ocr_failed' ? MSG.OCR_FAIL() : `❌ ${data.message || data.error || 'รับสลิปไม่สำเร็จ'}`);
         showToast(`❌ ${data.message || 'อ่านสลิปล้มเหลว'}`);
+        if (data.error === 'no_pin') setPanelMode('pin');
         return;
       }
       setSummary(data.summary);
@@ -635,16 +637,25 @@ export default function App() {
     }
   }
 
-  async function handleResetDemo() {
+  async function handleGoLive() {
+    if (!window.confirm('เริ่มใช้งานจริง: ล้างรายการทั้งหมด + ประวัติรอบ + บัญชี PIN แล้วเปิดรอบใหม่ยอด 0\n(Start real use: wipe all data)\n\nยืนยันหรือไม่?')) return;
     setLoadingAction('reset');
     try {
-      const res = await fetch('/api/dashboard/reset-demo', { method: 'POST' });
+      const res = await fetch('/api/dashboard/go-live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'GO-LIVE' }),
+      });
       const data = await res.json();
       if (res.ok && data.ok) {
         setSummary(data.summary);
         setTransactions(data.transactions);
-        if (data.transactions?.[0]) setSelectedTxId(data.transactions[0].id);
-        showToast('🔄 รีเซ็ตข้อมูลตัวอย่างแล้ว');
+        if (Array.isArray(data.cycleHistory)) setCycleHistory(data.cycleHistory);
+        setSelectedTxId(null);
+        setPanelMode('pin');
+        showToast(`🟢 เริ่มใช้งานจริง รอบ ${data.summary?.cycle} — ตั้งบัญชีรับเงิน (Smart PIN) ก่อนรับสลิป`);
+      } else {
+        showToast(`❌ ${data.message || data.error || 'เริ่มใช้งานจริงไม่สำเร็จ'}`);
       }
     } catch (e) {
       showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
@@ -1342,17 +1353,32 @@ export default function App() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <BankLogo code={summary?.pinnedBank.code || 'KBANK'} size={52} />
+                    {summary?.pinnedBank.account ? (
+                      <BankLogo code={summary.pinnedBank.code} size={52} />
+                    ) : (
+                      <div style={{ width: 52, height: 52, borderRadius: 14, display: 'grid', placeItems: 'center', fontSize: 26, background: 'var(--b1)', border: '1px dashed #ff6d35' }}>📌</div>
+                    )}
                     <div>
                       <div style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600 }}>
                         📌 บัญชีรับเงินวันนี้ (Today's PIN)
                       </div>
-                      <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--t1)', marginTop: '2px' }}>
-                        {pinnedAsset.thai} ({summary?.pinnedBank.code || 'BBL'})
-                      </div>
-                      <div style={{ fontSize: '13px', color: 'var(--c)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
-                        {summary?.pinnedBank.account || '097-0-28xxx-x'} · <span style={{ color: 'var(--t2)', fontFamily: 'inherit', fontWeight: 500 }}>{summary?.pinnedBank.holder || ''}</span>
-                      </div>
+                      {summary?.pinnedBank.account ? (
+                        <>
+                          <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--t1)', marginTop: '2px' }}>
+                            {pinnedAsset.thai} ({summary.pinnedBank.code})
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--c)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+                            {summary.pinnedBank.account} · <span style={{ color: 'var(--t2)', fontFamily: 'inherit', fontWeight: 500 }}>{summary.pinnedBank.holder || ''}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: '18px', fontWeight: 800, color: '#ff6d35', marginTop: '2px' }}>
+                            ⚠️ ยังไม่ได้ตั้งบัญชี (No PIN)
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--t2)' }}>กด "เปลี่ยนบัญชี" เพื่อตั้งก่อนรับสลิป</div>
+                        </>
+                      )}
                     </div>
                   </div>
                   <CeButton
@@ -2045,8 +2071,8 @@ export default function App() {
                     <CeButton variant="gold" size="lg" fullWidth onClick={handleNewCycle} loading={loadingAction === 'cycle'}>
                       ยืนยันปิดรอบ & เปิดรอบใหม่
                     </CeButton>
-                    <CeButton variant="ghost" size="sm" fullWidth onClick={handleResetDemo} loading={loadingAction === 'reset'}>
-                      รีเซ็ตข้อมูลตัวอย่าง (Reset Demo)
+                    <CeButton variant="ghost" size="sm" fullWidth onClick={handleGoLive} loading={loadingAction === 'reset'}>
+                      🟢 เริ่มใช้งานจริง · ล้างข้อมูลทั้งหมด (Start Live)
                     </CeButton>
                     {cycleHistory.length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -2089,7 +2115,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 1-Click Quick Scenarios */}
+              {/* 1-Click Quick Scenarios (demo only — hidden in live mode so test values never enter the real ledger) */}
+              {!summary?.live && (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <CeButton
                   variant="outline"
@@ -2097,7 +2124,7 @@ export default function App() {
                   onClick={() => {
                     setScanThb('10000');
                     setScanBank(summary?.pinnedBank.code || 'KBANK');
-                    setScanAccount(summary?.pinnedBank.account || '1230004444');
+                    setScanAccount(summary?.pinnedBank.account || '');
                     setScanSender('นาย สมชาย ใจดี');
                     setScanConfidence('98.7');
                     setScanSlipDate(formatThaiSlipDateTime());
@@ -2139,7 +2166,7 @@ export default function App() {
                   onClick={() => {
                     setScanThb('8500');
                     setScanBank(summary?.pinnedBank.code || 'KBANK');
-                    setScanAccount(summary?.pinnedBank.account || '1230004444');
+                    setScanAccount(summary?.pinnedBank.account || '');
                     setScanSender('นาย สม...ย ใจดี');
                     setScanConfidence('72.0');
                     setScanSlipDate(formatThaiSlipDateTime());
@@ -2148,6 +2175,7 @@ export default function App() {
                   🟡 สลิปไม่ชัด
                 </CeButton>
               </div>
+              )}
 
               {/* Visual Real Thai Bank Logo Picker */}
               <div>
