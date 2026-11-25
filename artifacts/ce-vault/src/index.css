@@ -689,3 +689,14 @@ main,
   }
 }
 
+
+/* Action panel: keep clear of the sticky header when scrolled into view */
+#action-panel {
+  scroll-margin-top: 84px;
+}
+
+@media (max-width: 960px) {
+  #action-panel {
+    position: static !important;
+  }
+}

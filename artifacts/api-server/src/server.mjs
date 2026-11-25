@@ -280,8 +280,8 @@ function computeSummary(state) {
 }
 
 function nowHHMM() {
-  const d = new Date();
-  return d.toTimeString().slice(0, 5);
+  // Thai time (UTC+7) — same clock as slip timestamps
+  return formatThaiSlipDateTime().split(' ')[1];
 }
 
 function parseJsonBody(req) {
@@ -653,7 +653,10 @@ const server = http.createServer(async (req, res) => {
     // Scan / Intake new slip
     if (req.method === 'POST' && pathname === '/api/transactions/scan') {
       const body = await parseJsonBody(req);
-      const thb = Number(body.thb || 10000);
+      const thb = Number(body.thb);
+      if (!Number.isFinite(thb) || thb <= 0) {
+        return sendJson(res, 400, { ok: false, error: 'invalid_amount', message: 'ยอดเงินในสลิปต้องมากกว่า 0 บาท (THB amount must be > 0)' });
+      }
       const bank = String(body.bank || state.pinnedBank.code);
       const bankMatchesPin = bank.toUpperCase() === String(state.pinnedBank.code).toUpperCase();
       const account = String(body.account || (bankMatchesPin ? state.pinnedBank.account : 'xxx-x-x7413-x'));
@@ -705,9 +708,15 @@ const server = http.createServer(async (req, res) => {
         notes = `วงเงินเกินกำหนด (Limit Exceeded +฿${(summary.usedThb + thb - state.limitThb).toLocaleString()})`;
       }
 
-      const nextNum = 46 + state.transactions.length;
+      // Unique, monotonically increasing ID (count-based IDs repeated after cycle close/removals)
+      const maxExisting = state.transactions.reduce((m, t) => {
+        const n = Number(String(t.id).match(/(\d+)$/)?.[1] || 0);
+        return n > m ? n : m;
+      }, 45);
+      const nextNum = Math.max(Number(state.txSeq) || 0, maxExisting) + 1;
+      state.txSeq = nextNum; // persisted so closed-cycle IDs are never reused
       const newTx = {
-        id: `#CE-2026-A0${nextNum}`,
+        id: `#CE-2026-A${String(nextNum).padStart(3, '0')}`,
         thb,
         usdtExpected,
         usdtSent: 0,
@@ -806,7 +815,41 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { ok: false, error: 'tx_not_found', message: `ไม่พบรายการ (Transaction Not Found): ${txId}` });
       }
 
-      if (action === 'confirm') {
+      // Allowed status transitions — blocks invalid flows (e.g. settling a REJECTED slip)
+      const ALLOWED_FROM = {
+        confirm: ['REVIEW', 'OCR', 'MISMATCH'],
+        queue: ['READY', 'REVIEW', 'OCR'],
+        override: ['MISMATCH', 'REVIEW', 'OCR'],
+        recheck: ['MISMATCH', 'REVIEW', 'OCR'],
+        reject: ['READY', 'PENDING', 'REVIEW', 'OCR', 'MISMATCH', 'DUPLICATE'],
+        reverse: ['SETTLED', 'SHORT'],
+        settle: ['READY', 'PENDING'],
+        'recover-short': ['SHORT'],
+        reopen: ['REJECTED', 'REVERSED', 'DUPLICATE'],
+      };
+      const allowed = ALLOWED_FROM[action];
+      if (!allowed) {
+        return sendJson(res, 400, { ok: false, error: 'unknown_action', message: `ไม่รู้จักคำสั่ง (Unknown action): ${action}` });
+      }
+      if (!allowed.includes(tx.status)) {
+        return sendJson(res, 409, {
+          ok: false,
+          error: 'invalid_transition',
+          message: `ทำรายการนี้ไม่ได้ในสถานะ ${tx.status} (Cannot ${action} a ${tx.status} transaction)`,
+        });
+      }
+      if (action === 'reject' && tx.status === 'PENDING' && tx.usdtSent > 0) {
+        return sendJson(res, 409, { ok: false, error: 'invalid_transition', message: 'โอนเหรียญไปแล้วบางส่วน ใช้ "ย้อนกลับ" แทน (Partially settled — reverse instead)' });
+      }
+
+      if (action === 'reopen') {
+        if (tx.status === 'REVERSED') {
+          tx.usdtSent = 0;
+          tx.settlements = [];
+        }
+        tx.status = 'REVIEW';
+        tx.notes = 'เปิดรายการใหม่ รอตรวจสอบ (Reopened · REVIEW)';
+      } else if (action === 'confirm') {
         tx.status = body.toPending ? 'PENDING' : 'READY';
         tx.dateMismatch = false;
         tx.notes = body.toPending
@@ -902,6 +945,9 @@ const server = http.createServer(async (req, res) => {
       } else if (action === 'recover-short') {
         const remaining = Number((tx.usdtExpected - tx.usdtSent).toFixed(2));
         const sendMore = Number(body.usdt ?? remaining);
+        if (!Number.isFinite(sendMore) || sendMore <= 0) {
+          return sendJson(res, 400, { ok: false, error: 'invalid_amount', message: 'จำนวน USDT ต้องมากกว่า 0 (Amount must be > 0)' });
+        }
         const newTotal = Number((tx.usdtSent + sendMore).toFixed(2));
         if (newTotal > Number((tx.usdtExpected + 0.01).toFixed(2))) {
           return sendJson(res, 422, {

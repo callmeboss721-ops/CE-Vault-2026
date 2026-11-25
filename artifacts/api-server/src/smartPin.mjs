@@ -173,12 +173,14 @@ export function maskAccountLast4(account) {
 }
 
 export function formatThaiSlipDateTime(date = new Date()) {
-  const d = date instanceof Date ? date : new Date(date);
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const beYear = d.getFullYear() + 543;
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
+  // Always Thai time (Asia/Bangkok, UTC+7, no DST) — servers like Render run in UTC.
+  const src = date instanceof Date ? date : new Date(date);
+  const d = new Date(src.getTime() + 7 * 60 * 60 * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const beYear = d.getUTCFullYear() + 543;
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const min = String(d.getUTCMinutes()).padStart(2, '0');
   return `${dd}/${mm}/${beYear} ${hh}:${min}`;
 }
 

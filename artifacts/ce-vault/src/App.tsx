@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   CeIcon,
   IconName,
@@ -249,9 +249,11 @@ export default function App() {
   // Messages filter
   const [msgGroup, setMsgGroup] = useState<string>('ALL');
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = useCallback((msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), msg.startsWith('❌') ? 6000 : 3500);
   }, []);
 
   const fetchSettings = useCallback(async () => {
@@ -342,6 +344,20 @@ export default function App() {
   }, [fetchMarket, fetchVault, fetchBots]);
 
   const selectedTx = transactions.find((t) => t.id === selectedTxId) || transactions[0] || null;
+
+  // On narrow screens the action panel sits below the queue — bring it into view after a tap.
+  const actionPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const pendingPanelScroll = React.useRef(false);
+  const focusPanel = useCallback(() => {
+    pendingPanelScroll.current = true;
+  }, []);
+  useEffect(() => {
+    if (!pendingPanelScroll.current) return;
+    pendingPanelScroll.current = false;
+    if (window.innerWidth <= 960) {
+      actionPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [panelMode, selectedTxId]);
 
   useEffect(() => {
     if (selectedTx) {
@@ -534,7 +550,11 @@ export default function App() {
             : `📌 เปลี่ยนบัญชีหลักเป็น ${data.pinnedBank.code} แล้ว`
         );
         setPanelMode('tx');
+      } else {
+        showToast(`❌ ${data.message || data.error || 'เปลี่ยนบัญชีไม่สำเร็จ'}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -554,7 +574,11 @@ export default function App() {
         fetchMarket();
         showToast(`💱 ตั้งเรทโต๊ะเป็น ${data.rate.toFixed(2)} THB แล้ว`);
         setPanelMode('tx');
+      } else {
+        showToast(`❌ ${data.message || data.error || 'ตั้งเรทไม่สำเร็จ'}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -575,7 +599,11 @@ export default function App() {
         fetchMarket();
         showToast(`🤖 ตั้งเรทอัตโนมัติตาม Binance TH: ${data.rate.toFixed(2)} THB`);
         setPanelMode('tx');
+      } else {
+        showToast(`❌ ${data.message || data.error || 'ดึงเรทตลาดไม่สำเร็จ'}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -597,7 +625,11 @@ export default function App() {
         fetchSettings();
         showToast(`🔄 ปิดรอบ ${data.oldCycle} → เปิดรอบ ${data.newCycle} สำเร็จ`);
         setPanelMode('tx');
+      } else {
+        showToast(`❌ ${data.message || data.error || 'ปิดรอบไม่สำเร็จ'}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -614,6 +646,8 @@ export default function App() {
         if (data.transactions?.[0]) setSelectedTxId(data.transactions[0].id);
         showToast('🔄 รีเซ็ตข้อมูลตัวอย่างแล้ว');
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -641,6 +675,8 @@ export default function App() {
       } else {
         showToast(`🤖 ${data.bot.name} → ${data.bot.status.toUpperCase()}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -666,7 +702,11 @@ export default function App() {
         setEditingBotSlug(null);
         setBotCustomToken('');
         showToast(`💾 บันทึกการตั้งค่า ${data.bot.name} แล้ว`);
+      } else {
+        showToast(`❌ ${data.message || data.error || 'บันทึกไม่สำเร็จ'}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -684,6 +724,8 @@ export default function App() {
       if (Array.isArray(data.deliveryLog)) setDeliveryLog(data.deliveryLog);
       if (res.ok && data.ok) showToast(`📡 ส่งสถานะบอททั้ง ${fleetSummary?.total || 14} ตัวเข้า Telegram สำเร็จ (#${data.messageId})`);
       else showToast(`❌ ส่งไม่สำเร็จ: ${data.description || 'กรุณาตั้งค่า Telegram Bot'}`);
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -709,6 +751,8 @@ export default function App() {
       const okMsg = `เชื่อมต่อบอทสำเร็จ: @${data.bot.username} (${data.bot.firstName}) · ${data.latencyMs}ms`;
       setTgStatusBanner({ ok: true, text: okMsg });
       showToast(`✅ ${okMsg}`);
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -734,6 +778,8 @@ export default function App() {
       } else {
         setTgStatusBanner({ ok: false, text: 'ยังไม่พบแชทล่าสุด กรุณาทักบอท 1 ครั้งแล้วลองใหม่' });
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -767,7 +813,12 @@ export default function App() {
           text: clearToken ? 'ล้าง Token บอทแล้ว' : 'บันทึกการตั้งค่าเรียบร้อยแล้ว (Settings Saved)',
         });
         showToast('✅ บันทึกการตั้งค่าสำเร็จ');
+      } else {
+        setTgStatusBanner({ ok: false, text: data.message || data.description || 'บันทึกไม่สำเร็จ' });
+        showToast(`❌ ${data.message || data.description || 'บันทึกไม่สำเร็จ'}`);
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -795,6 +846,8 @@ export default function App() {
       }
       setTgStatusBanner({ ok: true, text: `ส่งเข้า ${data.chatTitle} สำเร็จ! (msg #${data.messageId} · ${data.latencyMs}ms)` });
       showToast(`🚀 ส่งเข้า Telegram สำเร็จ (#${data.messageId})`);
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -809,7 +862,11 @@ export default function App() {
         setMarket(m);
         await fetchVault();
         showToast(`📈 อัปเดต Binance TH: ${m.rate?.toFixed(2) || '—'} THB`);
+      } else {
+        showToast('❌ ดึงเรทตลาดไม่สำเร็จ (Market unavailable)');
       }
+    } catch (e) {
+      showToast(`❌ เชื่อมต่อไม่สำเร็จ (Network error): ${String(e)}`);
     } finally {
       setLoadingAction(null);
     }
@@ -832,9 +889,29 @@ export default function App() {
     }
   }
 
-  function copyText(txt: string, label = 'คัดลอกข้อความแล้ว') {
-    navigator.clipboard?.writeText(txt);
-    showToast(`📋 ${label}`);
+  async function copyText(txt: string, label = 'คัดลอกข้อความแล้ว') {
+    try {
+      if (!navigator.clipboard) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(txt);
+      showToast(`📋 ${label}`);
+      return;
+    } catch {
+      // Fallback for http / in-app browsers / denied permission
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast(ok ? `📋 ${label}` : '❌ คัดลอกไม่สำเร็จ — กรุณากดค้างเพื่อคัดลอกเอง');
+      } catch {
+        showToast('❌ คัดลอกไม่สำเร็จ — กรุณากดค้างเพื่อคัดลอกเอง');
+      }
+    }
   }
 
   function renderBotMessageForTx(tx: Transaction): string {
@@ -1281,7 +1358,10 @@ export default function App() {
                   <CeButton
                     variant="primary"
                     size="sm"
-                    onClick={() => setPanelMode('pin')}
+                    onClick={() => {
+                      focusPanel();
+                      setPanelMode('pin');
+                    }}
                     icon={<CeIcon name="pin" size={14} color="var(--on-c)" />}
                   >
                     เปลี่ยนบัญชี (Smart PIN)
@@ -1340,10 +1420,10 @@ export default function App() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <CeButton variant="outline" size="sm" onClick={() => setPanelMode('rate')}>
+                    <CeButton variant="outline" size="sm" onClick={() => { focusPanel(); setPanelMode('rate'); }}>
                       ปรับเรท
                     </CeButton>
-                    <CeButton variant="ghost" size="sm" onClick={() => setPanelMode('cycle')}>
+                    <CeButton variant="ghost" size="sm" onClick={() => { focusPanel(); setPanelMode('cycle'); }}>
                       ปิดรอบ {summary?.cycle || 'CE44'}
                     </CeButton>
                   </div>
@@ -1444,6 +1524,7 @@ export default function App() {
                       status={tx.status}
                       selected={selectedTx?.id === tx.id && panelMode === 'tx'}
                       onClick={() => {
+                        focusPanel();
                         setSelectedTxId(tx.id);
                         setPanelMode('tx');
                       }}
@@ -1459,6 +1540,8 @@ export default function App() {
 
               {/* RIGHT: FOCUSED ACTION PANEL */}
               <div
+                ref={actionPanelRef}
+                id="action-panel"
                 className="ce-card"
                 style={{
                   background: 'var(--b2)',
@@ -1709,6 +1792,39 @@ export default function App() {
                           loading={loadingAction === `${selectedTx.id}:reverse`}
                         >
                           ย้อนกลับ
+                        </CeButton>
+                      </div>
+                    )}
+
+                    {/* CLOSED STATES → REOPEN */}
+                    {(selectedTx.status === 'REJECTED' || selectedTx.status === 'REVERSED' || selectedTx.status === 'DUPLICATE') && (
+                      <div
+                        style={{
+                          background: 'var(--b1)',
+                          border: '1px solid var(--br)',
+                          borderRadius: '14px',
+                          padding: '15px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--t1)' }}>
+                            {selectedTx.status === 'REJECTED' ? 'รายการถูกปฏิเสธ' : selectedTx.status === 'REVERSED' ? 'รายการถูกย้อนกลับ' : 'สลิปซ้ำ'}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--t2)' }}>{selectedTx.notes || '—'}</div>
+                        </div>
+                        <CeButton
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleTxAction(selectedTx.id, 'reopen')}
+                          loading={loadingAction === `${selectedTx.id}:reopen`}
+                          icon={<CeIcon name="recheck" size={14} color="var(--c)" />}
+                        >
+                          เปิดใหม่เพื่อตรวจ (Reopen)
                         </CeButton>
                       </div>
                     )}

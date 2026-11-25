@@ -371,7 +371,8 @@ let state: VaultState = loadState();
 let botFleet: StoredBotRecord[] = loadBotFleet();
 
 function nowHHMM(): string {
-  return new Date().toTimeString().slice(0, 5);
+  // Thai time (UTC+7) — same clock as slip timestamps
+  return formatThaiSlipDateTime().split(' ')[1];
 }
 
 function rebaseSeed(s: VaultState, rate: number) {
@@ -949,7 +950,10 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
   }
 
   if (method === 'POST' && pathname === '/api/transactions/scan') {
-    const thb = Number(body.thb || 10000);
+    const thb = Number(body.thb);
+    if (!Number.isFinite(thb) || thb <= 0) {
+      return jsonRes(400, { ok: false, error: 'invalid_amount', message: 'ยอดเงินในสลิปต้องมากกว่า 0 บาท (THB amount must be > 0)' });
+    }
     const bank = String(body.bank || state.pinnedBank.code);
     const bankMatchesPin = bank.toUpperCase() === state.pinnedBank.code.toUpperCase();
     const account = String(body.account || (bankMatchesPin ? state.pinnedBank.account : 'xxx-x-x7413-x'));
@@ -1000,9 +1004,15 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
       notes = `วงเงินเกินกำหนด (Limit Exceeded +฿${(summary.usedThb + thb - state.limitThb).toLocaleString()})`;
     }
 
-    const nextNum = 46 + state.transactions.length;
+    // Unique, monotonically increasing ID (count-based IDs repeated after cycle close/removals)
+    const maxExisting = state.transactions.reduce((m: number, t: { id: string }) => {
+      const n = Number(String(t.id).match(/(\d+)$/)?.[1] || 0);
+      return n > m ? n : m;
+    }, 45);
+    const nextNum = Math.max(Number((state as { txSeq?: number }).txSeq) || 0, maxExisting) + 1;
+    (state as { txSeq?: number }).txSeq = nextNum; // persisted so closed-cycle IDs are never reused
     const newTx = {
-      id: `#CE-2026-A0${nextNum}`,
+      id: `#CE-2026-A${String(nextNum).padStart(3, '0')}`,
       thb,
       usdtExpected,
       usdtSent: 0,
@@ -1076,7 +1086,41 @@ async function handleLocalApi(pathname: string, searchParams: URLSearchParams, i
     const tx = state.transactions.find((t) => t.id === txId);
     if (!tx) return jsonRes(404, { ok: false, error: 'tx_not_found', message: `ไม่พบรายการ (Transaction Not Found): ${txId}` });
 
-    if (action === 'confirm') {
+    // Allowed status transitions — blocks invalid flows (e.g. settling a REJECTED slip)
+    const ALLOWED_FROM: Record<string, string[]> = {
+      confirm: ['REVIEW', 'OCR', 'MISMATCH'],
+      queue: ['READY', 'REVIEW', 'OCR'],
+      override: ['MISMATCH', 'REVIEW', 'OCR'],
+      recheck: ['MISMATCH', 'REVIEW', 'OCR'],
+      reject: ['READY', 'PENDING', 'REVIEW', 'OCR', 'MISMATCH', 'DUPLICATE'],
+      reverse: ['SETTLED', 'SHORT'],
+      settle: ['READY', 'PENDING'],
+      'recover-short': ['SHORT'],
+      reopen: ['REJECTED', 'REVERSED', 'DUPLICATE'],
+    };
+    const allowed = ALLOWED_FROM[action];
+    if (!allowed) {
+      return jsonRes(400, { ok: false, error: 'unknown_action', message: `ไม่รู้จักคำสั่ง (Unknown action): ${action}` });
+    }
+    if (!allowed.includes(tx.status)) {
+      return jsonRes(409, {
+        ok: false,
+        error: 'invalid_transition',
+        message: `ทำรายการนี้ไม่ได้ในสถานะ ${tx.status} (Cannot ${action} a ${tx.status} transaction)`,
+      });
+    }
+    if (action === 'reject' && tx.status === 'PENDING' && tx.usdtSent > 0) {
+      return jsonRes(409, { ok: false, error: 'invalid_transition', message: 'โอนเหรียญไปแล้วบางส่วน ใช้ "ย้อนกลับ" แทน (Partially settled — reverse instead)' });
+    }
+
+    if (action === 'reopen') {
+      if (tx.status === 'REVERSED') {
+        tx.usdtSent = 0;
+        tx.settlements = [];
+      }
+      tx.status = 'REVIEW';
+      tx.notes = 'เปิดรายการใหม่ รอตรวจสอบ (Reopened · REVIEW)';
+    } else if (action === 'confirm') {
       tx.status = body.toPending ? 'PENDING' : 'READY';
       tx.dateMismatch = false;
       tx.notes = body.toPending
