@@ -19,7 +19,7 @@ interface TxItemProps {
 
 const STATUS_ACCENT: Record<TxStatus, string> = {
   READY:     '#ffca28',
-  PENDING:   '#3fe0ff',
+  PENDING:   'var(--c)',
   SETTLED:   '#44d895',
   SHORT:     '#ff5252',
   REJECTED:  '#8899aa',
@@ -37,8 +37,8 @@ export function TxItem({ id, thb, usdt, bank, sender, time, status, selected, on
       onClick={onClick}
       className={`ce-tx-row ${selected ? 'is-selected' : ''}`}
       style={{
-        background:   selected ? 'rgba(63, 224, 255, 0.08)' : 'var(--b2)',
-        border:       selected ? '1px solid rgba(63, 224, 255, 0.45)' : '1px solid var(--br)',
+        background:   selected ? 'var(--ca)' : 'var(--b2)',
+        border:       selected ? '1px solid var(--cc)' : '1px solid var(--br)',
         borderRadius: '14px',
         padding:      '13px 15px',
         display:      'flex',

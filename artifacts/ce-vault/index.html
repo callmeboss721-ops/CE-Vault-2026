@@ -2,6 +2,14 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      try {
+        var t = localStorage.getItem('ce-theme');
+        document.documentElement.dataset.theme = t === 'gold' || t === 'light' ? t : 'midnight';
+      } catch (e) {
+        document.documentElement.dataset.theme = 'midnight';
+      }
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CE VAULT · Operator Command Desk</title>
     <meta name="description" content="CE Vault Operator Command Desk — Slip OCR Verification, Bank PIN Match, USDT Settlement & Cycle Control" />

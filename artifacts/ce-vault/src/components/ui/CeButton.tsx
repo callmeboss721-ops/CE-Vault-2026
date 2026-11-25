@@ -18,7 +18,7 @@ interface CeButtonProps {
 }
 
 const V_STYLE: Record<Variant, React.CSSProperties> = {
-  primary: { background: 'var(--c)',  color: 'var(--b0)', border: '1px solid transparent' },
+  primary: { background: 'var(--c)',  color: 'var(--on-c)', border: '1px solid transparent' },
   success: { background: 'var(--s)',  color: 'var(--b0)', border: '1px solid transparent' },
   danger:  { background: 'var(--d)',  color: '#fff',      border: '1px solid transparent' },
   warning: { background: 'var(--w)',  color: 'var(--b0)', border: '1px solid transparent' },
@@ -28,9 +28,9 @@ const V_STYLE: Record<Variant, React.CSSProperties> = {
 }
 
 const S_STYLE: Record<Size, React.CSSProperties> = {
-  sm: { padding: '7px 14px',  fontSize: '10px' },
-  md: { padding: '10px 20px', fontSize: '12px' },
-  lg: { padding: '14px 28px', fontSize: '14px' },
+  sm: { padding: '7px 14px',  fontSize: '12px' },
+  md: { padding: '10px 20px', fontSize: '13px' },
+  lg: { padding: '14px 28px', fontSize: '15px' },
 }
 
 export function CeButton({
@@ -47,20 +47,19 @@ export function CeButton({
     <button
       onClick={onClick}
       disabled={disabled || loading}
+      className="ce-btn"
       style={{
         display:       'inline-flex',
         alignItems:    'center',
         justifyContent:'center',
         gap:           '7px',
-        borderRadius:  '9999px',
-        fontFamily:    "'Space Grotesk', system-ui",
+        borderRadius:  '10px',
         fontWeight:    700,
-        letterSpacing: '0.5px',
-        textTransform: 'uppercase',
+        letterSpacing: '0.01em',
         cursor:        disabled || loading ? 'not-allowed' : 'pointer',
         opacity:       disabled ? 0.5 : 1,
         width:         fullWidth ? '100%' : undefined,
-        transition:    'all 0.15s',
+        transition:    'filter 0.15s, transform 0.12s, background 0.15s',
         whiteSpace:    'nowrap',
         ...V_STYLE[variant],
         ...S_STYLE[size],

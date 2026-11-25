@@ -344,7 +344,7 @@ textarea {
 /* ── Simplified Clean Fintech UI Helpers ── */
 .ce-tx-row:hover {
   background: var(--b3) !important;
-  border-color: rgba(63, 224, 255, 0.35) !important;
+  border-color: var(--cb) !important;
 }
 
 .ce-hero-grid {
@@ -382,12 +382,12 @@ textarea {
 
 .ce-bank-tile:hover {
   background: var(--b3);
-  border-color: rgba(63, 224, 255, 0.35);
+  border-color: var(--cb);
 }
 
 .ce-bank-tile.is-active {
-  background: rgba(63, 224, 255, 0.12);
-  border-color: #3fe0ff;
+  background: var(--ca);
+  border-color: var(--c);
   color: var(--t1);
 }
 
@@ -404,13 +404,288 @@ textarea {
 
 .ce-input:focus {
   outline: none;
-  border-color: #3fe0ff;
+  border-color: var(--c);
 }
 
 @media (max-width: 960px) {
   .ce-hero-grid,
   .ce-workspace-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THEME SYSTEM — set on <html data-theme="midnight|gold|light">.
+   :root keeps the canonical CE tokens (midnight = default); each
+   theme only overrides the aliases the UI reads (b*, c*, t*, br…).
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --hdr: rgba(6, 16, 32, 0.92);
+  --on-c: #061020;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 30px rgba(0, 0, 0, 0.28);
+  --grain: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
+}
+
+html[data-theme="gold"] {
+  --b0: #0c0a07;
+  --b1: #13100b;
+  --b2: #19150e;
+  --b3: #221c12;
+  --b4: #2c2417;
+  --c: #e8b84a;
+  --ca: rgba(232, 184, 74, 0.12);
+  --cb: rgba(232, 184, 74, 0.3);
+  --cc: rgba(232, 184, 74, 0.48);
+  --g: #f3d488;
+  --ga: rgba(243, 212, 136, 0.12);
+  --gb: rgba(243, 212, 136, 0.32);
+  --s: #5fd39a;
+  --w: #f2c14e;
+  --t1: #f7f1e6;
+  --t2: rgba(247, 241, 230, 0.66);
+  --t3: rgba(247, 241, 230, 0.38);
+  --br: rgba(232, 184, 74, 0.14);
+  --hdr: rgba(12, 10, 7, 0.92);
+  --on-c: #1a1307;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --b0: #f2f4f8;
+  --b1: #ffffff;
+  --b2: #ffffff;
+  --b3: #eef1f6;
+  --b4: #e2e7ef;
+  --c: #0b7fc0;
+  --ca: rgba(11, 127, 192, 0.09);
+  --cb: rgba(11, 127, 192, 0.26);
+  --cc: rgba(11, 127, 192, 0.45);
+  --g: #9a7616;
+  --ga: rgba(154, 118, 22, 0.1);
+  --gb: rgba(154, 118, 22, 0.3);
+  --s: #138a5a;
+  --sa: rgba(19, 138, 90, 0.1);
+  --sb: rgba(19, 138, 90, 0.3);
+  --d: #c0394f;
+  --w: #9c6f00;
+  --wa: rgba(156, 111, 0, 0.1);
+  --wb: rgba(156, 111, 0, 0.3);
+  --al: #c8364e;
+  --ala: rgba(200, 54, 78, 0.09);
+  --alb: rgba(200, 54, 78, 0.3);
+  --t1: #0f1b2c;
+  --t2: rgba(15, 27, 44, 0.7);
+  --t3: rgba(15, 27, 44, 0.46);
+  --br: rgba(15, 27, 44, 0.1);
+  --hdr: rgba(255, 255, 255, 0.9);
+  --on-c: #ffffff;
+  --shadow-card: 0 1px 2px rgba(15, 27, 44, 0.05), 0 8px 24px rgba(15, 27, 44, 0.06);
+  --grain: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0));
+}
+
+html[data-theme] body,
+html[data-theme],
+html[data-theme] #root {
+  background: var(--b0);
+}
+
+html[data-theme="light"] .bank-logo {
+  box-shadow: 0 0 0 1px rgba(15, 27, 44, 0.08);
+}
+
+/* Smooth colour transition when switching themes */
+body,
+header,
+main,
+.ce-card,
+.ce-kpi {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
+
+/* ── Card surface with subtle depth ── */
+.ce-card {
+  background-image: var(--grain);
+  box-shadow: var(--shadow-card);
+}
+
+/* ── KPI strip (top of desk) ── */
+.ce-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ce-kpi {
+  position: relative;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--b2);
+  background-image: var(--grain);
+  border: 1px solid var(--br);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.ce-kpi__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t3);
+  letter-spacing: 0.01em;
+}
+
+.ce-kpi__value {
+  margin-top: 4px;
+  font-family: "Space Mono", var(--app-font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(16px, 2.1vw, 21px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.ce-kpi__hint {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--t3);
+}
+
+/* ── Theme switcher (header) ── */
+.ce-theme-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9999px;
+  background: var(--b1);
+  border: 1px solid var(--br);
+}
+
+.ce-theme-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ce-theme-switch button:hover {
+  color: var(--t1);
+}
+
+.ce-theme-switch button.is-active {
+  background: var(--b3);
+  color: var(--t1);
+}
+
+.ce-theme-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(127, 127, 127, 0.35);
+}
+
+/* ── Main tab navigation ── */
+.ce-main-nav button {
+  transition: background 0.15s, color 0.15s, transform 0.12s;
+}
+
+.ce-main-nav button:hover {
+  color: var(--t1) !important;
+}
+
+.ce-main-nav button:active {
+  transform: scale(0.97);
+}
+
+.ce-nav-short {
+  display: none;
+}
+
+/* ── Interactive feedback ── */
+.ce-btn {
+  font-family: "Noto Sans Thai", "Space Grotesk", system-ui, sans-serif !important;
+}
+
+.ce-btn:not(:disabled):hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.ce-btn:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
+}
+
+.ce-tx-item {
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+}
+
+.ce-tx-item:hover {
+  background: var(--b3) !important;
+  border-color: var(--cb) !important;
+}
+
+/* ── Responsive: tablet ── */
+@media (max-width: 960px) {
+  .ce-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── Responsive: phone → bottom tab bar ── */
+@media (max-width: 720px) {
+  /* backdrop-filter on the header would trap the fixed nav inside it */
+  header {
+    backdrop-filter: none !important;
+  }
+
+  main {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  .ce-workspace-grid > *,
+  .ce-hero-grid > * {
+    min-width: 0;
+  }
+
+  .ce-main-nav {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 60;
+    justify-content: space-between;
+    flex-wrap: nowrap !important;
+    background: var(--hdr) !important;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .ce-main-nav button {
+    flex: 1;
+    padding: 10px 6px !important;
+  }
+
+  .ce-nav-long {
+    display: none;
+  }
+
+  .ce-nav-short {
+    display: inline;
+  }
+
+  main {
+    padding-bottom: 96px !important;
+  }
+
+  .ce-theme-label {
+    display: none;
   }
 }
 

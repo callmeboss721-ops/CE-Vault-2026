@@ -112,6 +112,23 @@ interface NotifyEvents {
 }
 
 type MainTab = 'desk' | 'scan' | 'bots' | 'settings';
+type ThemeName = 'midnight' | 'gold' | 'light';
+
+const THEMES: { id: ThemeName; label: string; swatch: string }[] = [
+  { id: 'midnight', label: 'Midnight', swatch: '#3fe0ff' },
+  { id: 'gold', label: 'Gold', swatch: '#e8b84a' },
+  { id: 'light', label: 'Light', swatch: '#f2f4f8' },
+];
+
+function readStoredTheme(): ThemeName {
+  try {
+    const t = localStorage.getItem('ce-theme');
+    if (t === 'midnight' || t === 'gold' || t === 'light') return t;
+  } catch {
+    /* storage unavailable */
+  }
+  return 'midnight';
+}
 type SettingsSubTab = 'api' | 'messages' | 'banks';
 type PanelMode = 'tx' | 'pin' | 'rate' | 'cycle';
 type SimpleQueueFilter = 'ALL' | 'ACTION' | 'PENDING' | 'SETTLED';
@@ -141,6 +158,16 @@ function fmtUsdt(n: number): string {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('desk');
+  const [theme, setTheme] = useState<ThemeName>(readStoredTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('ce-theme', theme);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [theme]);
   const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('api');
   const [summary, setSummary] = useState<VaultSummary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -1005,7 +1032,7 @@ export default function App() {
       {/* ── CLEAN TOP NAVIGATION BAR (ONLY 4 CLEAR TABS) ── */}
       <header
         style={{
-          background: 'rgba(6, 16, 32, 0.94)',
+          background: 'var(--hdr)',
           backdropFilter: 'blur(14px)',
           borderBottom: '1px solid var(--br)',
           position: 'sticky',
@@ -1066,6 +1093,8 @@ export default function App() {
 
           {/* 4 Clean Primary Navigation Tabs */}
           <nav
+            className="ce-main-nav"
+            aria-label="เมนูหลัก (Main navigation)"
             style={{
               display: 'flex',
               gap: '4px',
@@ -1078,16 +1107,22 @@ export default function App() {
           >
             {(
               [
-                { id: 'desk', label: 'หน้าหลัก (Desk)' },
-                { id: 'scan', label: 'รับสลิป (Scan)' },
-                { id: 'bots', label: `บอททั้งหมด (${fleetSummary?.total || 14})` },
-                { id: 'settings', label: 'ตั้งค่า (Settings)' },
-              ] as { id: MainTab; label: string }[]
+                { id: 'desk', label: 'หน้าหลัก (Desk)', short: 'หน้าหลัก', icon: 'gem' },
+                { id: 'scan', label: 'รับสลิป (Scan)', short: 'รับสลิป', icon: 'scan' },
+                { id: 'bots', label: `บอททั้งหมด (${fleetSummary?.total || 14})`, short: 'บอท', icon: 'bot' },
+                { id: 'settings', label: 'ตั้งค่า (Settings)', short: 'ตั้งค่า', icon: 'settings' },
+              ] as { id: MainTab; label: string; short: string; icon: IconName }[]
             ).map((t) => (
               <button
                 key={t.id}
+                id={`nav-${t.id}`}
                 onClick={() => setActiveTab(t.id)}
+                aria-current={activeTab === t.id ? 'page' : undefined}
                 style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
                   padding: '7px 15px',
                   borderRadius: '9px',
                   fontSize: '12px',
@@ -1095,17 +1130,34 @@ export default function App() {
                   cursor: 'pointer',
                   border: 'none',
                   background: activeTab === t.id ? 'var(--c)' : 'transparent',
-                  color: activeTab === t.id ? 'var(--b0)' : 'var(--t2)',
-                  transition: 'all 0.15s',
+                  color: activeTab === t.id ? 'var(--on-c)' : 'var(--t2)',
                 }}
               >
-                {t.label}
+                <CeIcon name={t.icon} size={14} color={activeTab === t.id ? 'var(--on-c)' : 'currentColor'} />
+                <span className="ce-nav-long">{t.label}</span>
+                <span className="ce-nav-short">{t.short}</span>
               </button>
             ))}
           </nav>
 
-          {/* Compact Live Binance TH + Status */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Theme switcher + Compact Live Binance TH + Status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="ce-theme-switch" role="radiogroup" aria-label="ธีม (Theme)">
+              {THEMES.map((th) => (
+                <button
+                  key={th.id}
+                  id={`theme-${th.id}`}
+                  role="radio"
+                  aria-checked={theme === th.id}
+                  className={theme === th.id ? 'is-active' : ''}
+                  onClick={() => setTheme(th.id)}
+                  title={`ธีม ${th.label}`}
+                >
+                  <span className="ce-theme-swatch" style={{ background: th.swatch }} />
+                  <span className="ce-theme-label">{th.label}</span>
+                </button>
+              ))}
+            </div>
             <button
               onClick={handleRefreshMarketNow}
               title="คลิกเพื่ออัปเดตเรทตลาดสดจาก Binance TH"
@@ -1169,10 +1221,37 @@ export default function App() {
         {/* ═══════════════════════════════════════════════════════ */}
         {activeTab === 'desk' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* HERO ROW: 2 CLEAN CARDS (PINNED BANK + RATE & SUMMARY) */}
+            {/* KPI STRIP: the 4 numbers operators glance at most */}
+            <section className="ce-kpi-strip" aria-label="สรุปยอดรอบนี้ (Cycle summary)">
+              <div className="ce-kpi">
+                <div className="ce-kpi__label">รับเงิน (THB Received)</div>
+                <div className="ce-kpi__value" style={{ color: 'var(--s)' }}>฿{fmtInt(summary?.receivedThb || 0)}</div>
+                <div className="ce-kpi__hint">รอบ {summary?.cycle || 'CE44'}</div>
+              </div>
+              <div className="ce-kpi">
+                <div className="ce-kpi__label">โอนแล้ว (USDT Sent)</div>
+                <div className="ce-kpi__value" style={{ color: 'var(--c)' }}>{fmtUsdt(summary?.sentUsdt || 0)}</div>
+                <div className="ce-kpi__hint">USDT</div>
+              </div>
+              <div className="ce-kpi">
+                <div className="ce-kpi__label">ค้างส่ง / ขาด (Outstanding)</div>
+                <div className="ce-kpi__value" style={{ color: (summary?.shortUsdt || 0) > 0 ? 'var(--al)' : 'var(--w)' }}>
+                  {fmtUsdt((summary?.pendingUsdt || 0) + (summary?.shortUsdt || 0))}
+                </div>
+                <div className="ce-kpi__hint">{actionNeededCount} รายการต้องจัดการ</div>
+              </div>
+              <div className="ce-kpi">
+                <div className="ce-kpi__label">กำไรรอบนี้ (Profit)</div>
+                <div className="ce-kpi__value" style={{ color: 'var(--g)' }}>฿{fmtInt(summary?.profitThb || 0)}</div>
+                <div className="ce-kpi__hint">เรท {summary ? summary.rate.toFixed(2) : '—'}</div>
+              </div>
+            </section>
+
+            {/* HERO ROW: PINNED BANK + RATE */}
             <div className="ce-hero-grid">
               {/* CARD A: บัญชีรับเงินวันนี้ (WITH REAL THAI BANK LOGO) */}
               <div
+                className="ce-card"
                 style={{
                   background: 'var(--b2)',
                   border: '1px solid var(--br)',
@@ -1203,7 +1282,7 @@ export default function App() {
                     variant="primary"
                     size="sm"
                     onClick={() => setPanelMode('pin')}
-                    icon={<CeIcon name="pin" size={14} color="var(--b0)" />}
+                    icon={<CeIcon name="pin" size={14} color="var(--on-c)" />}
                   >
                     เปลี่ยนบัญชี (Smart PIN)
                   </CeButton>
@@ -1224,7 +1303,7 @@ export default function App() {
                       style={{
                         width: `${Math.min(100, summary?.usedPercent || 0)}%`,
                         height: '100%',
-                        background: (summary?.usedPercent || 0) >= 85 ? '#ff5252' : 'linear-gradient(90deg, #3fe0ff, #44d895)',
+                        background: (summary?.usedPercent || 0) >= 85 ? 'var(--al)' : 'linear-gradient(90deg, var(--c), var(--s))',
                         borderRadius: '9999px',
                         transition: 'width 0.3s ease',
                       }}
@@ -1235,6 +1314,7 @@ export default function App() {
 
               {/* CARD B: เรทโต๊ะ & สรุปยอดวันนี้ */}
               <div
+                className="ce-card"
                 style={{
                   background: 'var(--b2)',
                   border: '1px solid var(--br)',
@@ -1269,32 +1349,22 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Clean 4-Metric Summary Strip */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', paddingTop: '12px', borderTop: '1px solid var(--br)' }}>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>รับเงินสด (THB)</div>
-                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--s)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
-                      ฿{fmtInt(summary?.receivedThb || 0)}
+                {/* Binance TH 24h range */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px', paddingTop: '12px', borderTop: '1px solid var(--br)' }}>
+                  {[
+                    { label: 'ต่ำสุด 24 ชม. (Low)', value: market?.low24h ? market.low24h.toFixed(2) : '—', color: 'var(--t1)' },
+                    { label: 'สูงสุด 24 ชม. (High)', value: market?.high24h ? market.high24h.toFixed(2) : '—', color: 'var(--t1)' },
+                    {
+                      label: 'เปลี่ยนแปลง (24h)',
+                      value: market?.changePercent !== undefined ? `${market.changePercent >= 0 ? '+' : ''}${market.changePercent.toFixed(2)}%` : '—',
+                      color: (market?.changePercent || 0) >= 0 ? 'var(--s)' : 'var(--al)',
+                    },
+                  ].map((m) => (
+                    <div key={m.label}>
+                      <div style={{ fontSize: '11px', color: 'var(--t3)' }}>{m.label}</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: m.color, fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>{m.value}</div>
                     </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>โอนแล้ว (USDT)</div>
-                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--c)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
-                      {fmtUsdt(summary?.sentUsdt || 0)}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>ค้างส่ง / ขาด</div>
-                    <div style={{ fontSize: '16px', fontWeight: 800, color: (summary?.shortUsdt || 0) > 0 ? '#ff5252' : 'var(--w)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
-                      {fmtUsdt((summary?.pendingUsdt || 0) + (summary?.shortUsdt || 0))}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: 'var(--t3)' }}>กำไรรอบนี้</div>
-                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--g)', fontFamily: "'Space Mono', monospace", marginTop: '2px' }}>
-                      ฿{fmtInt(summary?.profitThb || 0)}
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1303,6 +1373,7 @@ export default function App() {
             <div className="ce-workspace-grid">
               {/* LEFT: CLEAN TRANSACTION QUEUE */}
               <div
+                className="ce-card"
                 style={{
                   background: 'var(--b1)',
                   border: '1px solid var(--br)',
@@ -1324,7 +1395,7 @@ export default function App() {
                     variant="primary"
                     size="sm"
                     onClick={() => setActiveTab('scan')}
-                    icon={<CeIcon name="scan" size={14} color="var(--b0)" />}
+                    icon={<CeIcon name="scan" size={14} color="var(--on-c)" />}
                   >
                     + รับสลิปใหม่
                   </CeButton>
@@ -1388,6 +1459,7 @@ export default function App() {
 
               {/* RIGHT: FOCUSED ACTION PANEL */}
               <div
+                className="ce-card"
                 style={{
                   background: 'var(--b2)',
                   border: '1px solid var(--br)',
@@ -1540,7 +1612,7 @@ export default function App() {
                           fullWidth
                           onClick={() => handleTxAction(selectedTx.id, 'confirm')}
                           loading={loadingAction === `${selectedTx.id}:confirm`}
-                          icon={<CeIcon name="check" size={15} color="var(--b0)" />}
+                          icon={<CeIcon name="check" size={15} color="var(--on-c)" />}
                         >
                           ✓ ยืนยันสลิปถูกต้อง (Confirm → Ready)
                         </CeButton>
@@ -1560,7 +1632,7 @@ export default function App() {
                     {(selectedTx.status === 'READY' || selectedTx.status === 'PENDING' || selectedTx.status === 'SHORT') && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                          <span style={{ color: selectedTx.status === 'SHORT' ? '#ff5252' : 'var(--t2)', fontWeight: 700 }}>
+                          <span style={{ color: selectedTx.status === 'SHORT' ? 'var(--al)' : 'var(--t2)', fontWeight: 700 }}>
                             {selectedTx.status === 'SHORT'
                               ? `ยอดส่งขาด (Shortfall): ${fmtUsdt(selectedTx.usdtExpected - selectedTx.usdtSent)} USDT`
                               : `ยอดโอนครั้งนี้ (Remaining: ${fmtUsdt(selectedTx.usdtExpected - selectedTx.usdtSent)} USDT)`}
@@ -1601,7 +1673,7 @@ export default function App() {
                             )
                           }
                           loading={loadingAction === `${selectedTx.id}:settle` || loadingAction === `${selectedTx.id}:recover-short`}
-                          icon={<CeIcon name="check" size={16} color="var(--b0)" />}
+                          icon={<CeIcon name="check" size={16} color="var(--on-c)" />}
                         >
                           {selectedTx.status === 'SHORT'
                             ? 'โอนชดเชยยอดขาด (Recover Short)'
@@ -1753,7 +1825,7 @@ export default function App() {
                         disabled={!smartPinPreview}
                         loading={loadingAction === 'smart-pin-tg'}
                         onClick={() => handleSmartPinSubmit(true, true)}
-                        icon={<CeIcon name="pin" size={16} color="var(--b0)" />}
+                        icon={<CeIcon name="pin" size={16} color="var(--on-c)" />}
                       >
                         📌 บันทึก & ปักหมุดเข้า Telegram อัตโนมัติ
                       </CeButton>
@@ -2026,7 +2098,7 @@ export default function App() {
                   size="lg"
                   onClick={() => handleScanSubmit(false)}
                   loading={loadingAction === 'scan'}
-                  icon={<CeIcon name="scan" size={16} color="var(--b0)" />}
+                  icon={<CeIcon name="scan" size={16} color="var(--on-c)" />}
                 >
                   ตรวจสอบและรับสลิปเข้าคิว
                 </CeButton>
@@ -2116,7 +2188,7 @@ export default function App() {
                 size="sm"
                 loading={loadingAction === 'broadcast-fleet'}
                 onClick={handleBroadcastFleet}
-                icon={<CeIcon name="send" size={14} color="var(--b0)" />}
+                icon={<CeIcon name="send" size={14} color="var(--on-c)" />}
               >
                 📡 ส่งสถานะทุกบอทเข้า Telegram
               </CeButton>
