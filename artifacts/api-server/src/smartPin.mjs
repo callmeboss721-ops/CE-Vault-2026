@@ -115,14 +115,21 @@ export function parseSmartPinText(rawInput, fallbackLimit = 500000) {
     const match = working.match(re);
     if (match) {
       detectedBank = bank;
-      working = working.replace(match[0], ' ');
+      // Remove all aliases of the detected bank (e.g. both "ไทยพาณิชย์" and "SCB")
+      for (const a of [...bank.aliases].sort((x, y) => y.length - x.length)) {
+        const ascii = /^[a-z0-9.-]+$/i.test(a);
+        const esc = a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const rm = ascii ? new RegExp(`(?<![a-z0-9])${esc}(?![a-z0-9])`, 'gi') : new RegExp(esc, 'gi');
+        working = working.replace(rm, ' ');
+      }
       break;
     }
   }
 
   // 5. Remaining cleaned text is the account holder name
   const holder = working
-    .replace(/[()\[\]•·👍฿]/g, ' ')
+    .replace(/\p{Extended_Pictographic}|\uFE0F/gu, ' ')
+    .replace(/[()\[\]•·฿]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

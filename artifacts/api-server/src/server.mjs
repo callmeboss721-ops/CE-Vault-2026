@@ -1093,17 +1093,20 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Telegram Webhook handler (auto-formats & re-pins whenever a user pins a raw bank message in Telegram)
+    // Telegram Webhook handler (Smart PIN + all operator commands: /pin, /rate, /status, /bots, /help)
     if (req.method === 'POST' && pathname === '/api/telegram/webhook') {
       const update = await parseJsonBody(req);
       const msg = update?.message || update?.channel_post;
       const chatId = msg?.chat?.id ? String(msg.chat.id) : null;
-      const pinnedRaw = msg?.pinned_message?.text || msg?.pinned_message?.caption || '';
-      const cmdText = typeof msg?.text === 'string' && msg.text.startsWith('/pin ') ? msg.text.slice(5).trim() : '';
-      const sourceText = pinnedRaw && !pinnedRaw.includes('◈ CE EMPIRE · ข้อมูลบัญชีรับเงิน') ? pinnedRaw : cmdText;
+      if (!chatId) return sendJson(res, 200, { ok: true, handled: 'ignored' });
 
-      if (chatId && sourceText) {
-        const parsed = parseSmartPinText(sourceText, state.limitThb);
+      const sendReply = (text, event) =>
+        sendTelegramDetailed(CFG, text, { event, overrideChatId: chatId });
+
+      // 1. Auto-format & re-pin when someone pins a raw bank message in Telegram
+      const pinnedRaw = msg?.pinned_message?.text || msg?.pinned_message?.caption || '';
+      if (pinnedRaw && !pinnedRaw.includes('◈ CE EMPIRE · ข้อมูลบัญชีรับเงิน')) {
+        const parsed = parseSmartPinText(pinnedRaw, state.limitThb);
         if (parsed) {
           state.pinnedBank = {
             code: parsed.code,
@@ -1113,12 +1116,12 @@ const server = http.createServer(async (req, res) => {
             updatedAt: `${nowHHMM()} น.`,
           };
           state.limitThb = parsed.limitThb;
+          const idx = state.banks.findIndex((b) => String(b.code).toUpperCase() === parsed.code.toUpperCase() && b.account === parsed.account);
+          if (idx >= 0) state.banks[idx] = { code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder };
+          else state.banks.unshift({ code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder });
           saveState(state);
 
-          const sent = await sendTelegramDetailed(CFG, parsed.formattedMessage, {
-            event: 'webhook-smart-pin',
-            overrideChatId: chatId,
-          });
+          const sent = await sendReply(parsed.formattedMessage, 'webhook-smart-pin');
           let pinRes = null;
           if (sent.ok && sent.messageId) {
             pinRes = await pinTelegramMessage(CFG, sent.messageId, { overrideChatId: chatId });
@@ -1126,7 +1129,133 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 200, { ok: true, handled: 'smart-pin', parsed, sent, pinned: Boolean(pinRes?.ok) });
         }
       }
-      return sendJson(res, 200, { ok: true, handled: 'ignored' });
+
+      // 2. Parse slash commands (supports /cmd, /cmd@BotName, and multiline arguments)
+      const rawText = String(msg?.text || '').trim();
+      const cmdMatch = rawText.match(/^\/([a-zA-Z0-9_]+)(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*))?$/);
+      if (!cmdMatch) return sendJson(res, 200, { ok: true, handled: 'ignored' });
+
+      const cmd = cmdMatch[1].toLowerCase();
+      const arg = (cmdMatch[2] || '').trim();
+
+      if (cmd === 'pin') {
+        if (!arg) {
+          if (!state.pinnedBank?.account) {
+            const sent = await sendReply('⚠️ ยังไม่ได้ตั้งบัญชีรับเงิน (No PIN)\nพิมพ์: /pin ชื่อ-สกุล เลขบัญชี ธนาคาร วงเงิน\nเช่น: /pin ศักดิ์ดา อุบลภาพ 3074087884 ไทยพาณิชย์ วงเงิน 500000', 'webhook-pin-show');
+            return sendJson(res, 200, { ok: true, handled: 'pin-empty', sent });
+          }
+          const card = formatSmartPinCard({
+            code: state.pinnedBank.code,
+            account: state.pinnedBank.account,
+            holder: state.pinnedBank.holder,
+            limitThb: state.limitThb,
+          });
+          const sent = await sendReply(card, 'webhook-pin-show');
+          return sendJson(res, 200, { ok: true, handled: 'pin-show', sent });
+        }
+
+        const parsed = parseSmartPinText(arg, state.limitThb);
+        if (!parsed) {
+          const sent = await sendReply('❌ อ่านข้อมูลบัญชีไม่สำเร็จ กรุณาระบุชื่อ เลขบัญชี และธนาคาร\nเช่น:\n/pin ศักดิ์ดา อุบลภาพ 3074087884 ไทยพาณิชย์ วงเงิน 500000', 'webhook-pin-error');
+          return sendJson(res, 200, { ok: true, handled: 'pin-parse-failed', sent });
+        }
+        state.pinnedBank = {
+          code: parsed.code,
+          name: parsed.name,
+          account: parsed.account,
+          holder: parsed.holder,
+          updatedAt: `${nowHHMM()} น.`,
+        };
+        state.limitThb = parsed.limitThb;
+        const idx = state.banks.findIndex((b) => String(b.code).toUpperCase() === parsed.code.toUpperCase() && b.account === parsed.account);
+        if (idx >= 0) state.banks[idx] = { code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder };
+        else state.banks.unshift({ code: parsed.code, name: parsed.name, account: parsed.account, holder: parsed.holder });
+        saveState(state);
+
+        const sent = await sendReply(parsed.formattedMessage, 'webhook-smart-pin');
+        let pinRes = null;
+        if (sent.ok && sent.messageId) {
+          pinRes = await pinTelegramMessage(CFG, sent.messageId, { overrideChatId: chatId });
+        }
+        return sendJson(res, 200, { ok: true, handled: 'smart-pin', parsed, sent, pinned: Boolean(pinRes?.ok) });
+      }
+
+      if (cmd === 'rate') {
+        await refreshMarket();
+        if (arg.toLowerCase() === 'auto') {
+          state.rateMode = 'auto';
+          if (market.rate) state.rate = Number((market.rate + CFG.rateSpread).toFixed(2));
+          saveState(state);
+          const sent = await sendReply(`🤖 ตั้งเรทอัตโนมัติตาม Binance TH\n💱 DESK: ${state.rate.toFixed(2)} THB/USDT (+${CFG.rateSpread})\n📈 MARKET: ${(market.rate ?? state.marketRate).toFixed(2)} THB/USDT`, 'webhook-rate');
+          return sendJson(res, 200, { ok: true, handled: 'rate-auto', sent });
+        }
+        if (arg) {
+          const val = Number(arg.replace(/,/g, ''));
+          if (!Number.isFinite(val) || val <= 0) {
+            const sent = await sendReply('❌ เรทไม่ถูกต้อง พิมพ์ /rate 34.50 หรือ /rate auto', 'webhook-rate-error');
+            return sendJson(res, 200, { ok: true, handled: 'rate-invalid', sent });
+          }
+          state.rate = Number(val.toFixed(2));
+          state.rateMode = 'manual';
+          saveState(state);
+          const sent = await sendReply(`💱 ตั้งเรทโต๊ะ (Manual) เป็น ${state.rate.toFixed(2)} THB/USDT\n📈 MARKET: ${(market.rate ?? state.marketRate).toFixed(2)} THB/USDT (Binance TH)`, 'webhook-rate');
+          return sendJson(res, 200, { ok: true, handled: 'rate-set', sent });
+        }
+        const mkt = market.rate ?? state.marketRate;
+        const text = [
+          '◈ CE VAULT · RATE',
+          `💱 DESK: ${state.rate.toFixed(2)} THB/USDT (${state.rateMode === 'auto' ? 'AUTO' : 'MANUAL'})`,
+          `📈 MARKET: ${mkt.toFixed(2)} THB/USDT · ${market.source || 'Binance TH'}`,
+          `⏱️ ${nowHHMM()} น.`,
+        ].join('\n');
+        const sent = await sendReply(text, 'webhook-rate');
+        return sendJson(res, 200, { ok: true, handled: 'rate-show', sent });
+      }
+
+      if (cmd === 'status' || cmd === 'summary' || cmd === 'vault') {
+        const s = computeSummary(state);
+        const pinLine = s.pinnedBank?.account ? `${s.pinnedBank.code} · ${s.pinnedBank.account} (${s.pinnedBank.holder})` : 'ยังไม่ได้ตั้ง (No PIN)';
+        const text = [
+          `◈ CE VAULT · STATUS (${s.cycle})`,
+          `📌 PIN: ${pinLine}`,
+          `💱 RATE: ${s.rate.toFixed(2)} THB/USDT (MKT ${(market.rate ?? s.marketRate).toFixed(2)})`,
+          `💵 รับเงิน: ฿${s.receivedThb.toLocaleString()} / ฿${s.limitThb.toLocaleString()} (${s.usedPercent}%)`,
+          `💎 โอนแล้ว: ${s.sentUsdt.toFixed(2)} USDT`,
+          `⏳ ค้างโอน: ${s.pendingUsdt.toFixed(2)} USDT · ขาด: ${s.shortUsdt.toFixed(2)} USDT`,
+          `💰 กำไรรอบนี้: ฿${s.profitThb.toLocaleString()}`,
+          `📋 รายการทั้งหมด: ${state.transactions.length} (รอจัดการ ${(s.counts.REVIEW || 0) + (s.counts.MISMATCH || 0) + (s.counts.OCR || 0)})`,
+        ].join('\n');
+        const sent = await sendReply(text, 'webhook-status');
+        return sendJson(res, 200, { ok: true, handled: 'status', sent });
+      }
+
+      if (cmd === 'bots') {
+        const fsSummary = summarizeFleet(botFleet);
+        const text = [
+          `◈ CE VAULT · BOT FLEET (${fsSummary.active}/${fsSummary.total} ACTIVE)`,
+          ...botFleet.slice(0, 14).map((b) => `${b.status === 'ACTIVE' ? '🟢' : '⏸'} ${b.name} (${b.status})`),
+        ].join('\n');
+        const sent = await sendReply(text, 'webhook-bots');
+        return sendJson(res, 200, { ok: true, handled: 'bots', sent });
+      }
+
+      if (cmd === 'help' || cmd === 'start') {
+        const text = [
+          '◈ CE VAULT · คำสั่งทั้งหมด (Commands)',
+          '• /pin — ดูบัญชีรับเงินวันนี้',
+          '• /pin <ชื่อ เลขบัญชี ธนาคาร วงเงิน> — ตั้งและปักหมุดบัญชีอัตโนมัติ',
+          '• /rate — ดูเรทโต๊ะ + เรทตลาด Binance TH',
+          '• /rate 34.50 — ตั้งเรทโต๊ะแบบกำหนดเอง',
+          '• /rate auto — ตั้งเรทออโต้ตาม Binance TH',
+          '• /status — สรุปยอดรอบปัจจุบัน',
+          '• /bots — ดูสถานะบอททั้ง 14 ตัว',
+          '• ปักหมุดข้อความบัญชีในกลุ่ม — บอทจัดรูปแบบและปักหมุดให้อัตโนมัติ',
+        ].join('\n');
+        const sent = await sendReply(text, 'webhook-help');
+        return sendJson(res, 200, { ok: true, handled: 'help', sent });
+      }
+
+      return sendJson(res, 200, { ok: true, handled: 'unknown-command', cmd });
     }
 
     // Update pinned bank account

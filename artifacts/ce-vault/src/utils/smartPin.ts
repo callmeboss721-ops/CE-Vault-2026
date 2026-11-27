@@ -150,13 +150,19 @@ export function parseSmartPinText(rawInput: string, fallbackLimit = 500000): Par
     const match = working.match(re);
     if (match) {
       detectedBank = bank;
-      working = working.replace(match[0], ' ');
+      for (const a of [...bank.aliases].sort((x, y) => y.length - x.length)) {
+        const ascii = /^[a-z0-9.-]+$/i.test(a);
+        const esc = a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const rm = ascii ? new RegExp(`(?<![a-z0-9])${esc}(?![a-z0-9])`, 'gi') : new RegExp(esc, 'gi');
+        working = working.replace(rm, ' ');
+      }
       break;
     }
   }
 
   const holder = working
-    .replace(/[()[\]•·👍฿]/g, ' ')
+    .replace(/\p{Extended_Pictographic}|\uFE0F/gu, ' ')
+    .replace(/[()[\]•·฿]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
